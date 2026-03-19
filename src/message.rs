@@ -210,8 +210,19 @@ pub enum OvpnMessage {
     MultiLine(Vec<String>),
 
     /// A single non-SUCCESS/ERROR value line (from bare `hold`, bare `state`,
-    /// or `pkcs11-id-get`).
+    /// etc.).
     SingleValue(String),
+
+    /// Parsed response from `pkcs11-id-get`. The wire format is:
+    /// `PKCS11ID-ENTRY:'index', ID:'id', BLOB:'base64_cert'`
+    Pkcs11IdEntry {
+        /// Certificate index.
+        index: String,
+        /// PKCS#11 identifier.
+        id: String,
+        /// Base64-encoded certificate blob.
+        blob: String,
+    },
 
     /// A real-time notification, either single-line or accumulated multi-line.
     Notification(Notification),

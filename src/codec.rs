@@ -467,6 +467,9 @@ impl Decoder for OvpnCodec {
                     continue; // Accumulate until END.
                 }
                 ResponseKind::SingleValue => {
+                    if let Some(parsed) = parse_pkcs11id_entry(&line) {
+                        return Ok(Some(parsed));
+                    }
                     return Ok(Some(OvpnMessage::SingleValue(line)));
                 }
                 ResponseKind::SuccessOrError | ResponseKind::NoResponse => {
@@ -638,6 +641,19 @@ fn parse_echo(payload: &str) -> Option<Notification> {
 fn parse_pkcs11id_count(payload: &str) -> Option<Notification> {
     let count = payload.trim().parse().ok()?;
     Some(Notification::Pkcs11IdCount { count })
+}
+
+/// Parse `PKCS11ID-ENTRY:'idx', ID:'id', BLOB:'blob'` response line.
+fn parse_pkcs11id_entry(line: &str) -> Option<OvpnMessage> {
+    let rest = line.strip_prefix("PKCS11ID-ENTRY:'")?;
+    let (index, rest) = rest.split_once("', ID:'")?;
+    let (id, rest) = rest.split_once("', BLOB:'")?;
+    let blob = rest.strip_suffix('\'')?;
+    Some(OvpnMessage::Pkcs11IdEntry {
+        index: index.to_owned(),
+        id: id.to_owned(),
+        blob: blob.to_owned(),
+    })
 }
 
 /// Parse `Need 'name' ... MSG:message` from NEED-OK payload.

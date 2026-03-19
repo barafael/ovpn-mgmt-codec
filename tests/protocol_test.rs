@@ -1222,16 +1222,31 @@ fn hold_query_returns_one() {
 }
 
 #[test]
-fn pkcs11_id_get_single_value() {
+fn pkcs11_id_get_parsed() {
     let msgs = encode_then_decode(
         OvpnCommand::Pkcs11IdGet(0),
         "PKCS11ID-ENTRY:'0', ID:'MY_ID', BLOB:'MY_BLOB'\n",
     );
     assert_eq!(msgs.len(), 1);
-    assert!(matches!(
-        &msgs[0],
-        OvpnMessage::SingleValue(s) if s.contains("PKCS11ID-ENTRY")
-    ));
+    match &msgs[0] {
+        OvpnMessage::Pkcs11IdEntry { index, id, blob } => {
+            assert_eq!(index, "0");
+            assert_eq!(id, "MY_ID");
+            assert_eq!(blob, "MY_BLOB");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn pkcs11_id_get_malformed_falls_back() {
+    // If the format doesn't match, fall back to SingleValue
+    let msgs = encode_then_decode(
+        OvpnCommand::Pkcs11IdGet(0),
+        "some unexpected response\n",
+    );
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(&msgs[0], OvpnMessage::SingleValue(s) if s == "some unexpected response"));
 }
 
 #[test]
