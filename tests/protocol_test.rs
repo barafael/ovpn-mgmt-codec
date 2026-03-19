@@ -1539,6 +1539,66 @@ fn challenge_response_with_special_chars_in_state_id() {
     assert!(wire.contains("CRV1::abc+def/ghi=::mypin"));
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// Management password authentication (Phase 5)
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn decode_password_prompt() {
+    let msgs = decode_all("ENTER PASSWORD:\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(&msgs[0], OvpnMessage::PasswordPrompt));
+}
+
+#[test]
+fn encode_management_password() {
+    let wire = encode_to_string(OvpnCommand::ManagementPassword("s3cret".into()));
+    assert_eq!(wire, "s3cret\n");
+}
+
+#[test]
+fn management_password_handshake() {
+    let mut codec = OvpnCodec::new();
+
+    // Server sends password prompt.
+    let mut buf = BytesMut::from("ENTER PASSWORD:\n");
+    let msg = codec.decode(&mut buf).unwrap().unwrap();
+    assert!(matches!(msg, OvpnMessage::PasswordPrompt));
+
+    // Client sends password.
+    let mut enc_buf = BytesMut::new();
+    codec
+        .encode(OvpnCommand::ManagementPassword("s3cret".into()), &mut enc_buf)
+        .unwrap();
+    assert_eq!(&enc_buf[..], b"s3cret\n");
+
+    // Server responds with success, then sends banner.
+    buf.extend_from_slice(b"SUCCESS: password is correct\n");
+    buf.extend_from_slice(b">INFO:OpenVPN Management Interface Version 5\n");
+    let msg = codec.decode(&mut buf).unwrap().unwrap();
+    assert!(matches!(msg, OvpnMessage::Success(ref s) if s.contains("password is correct")));
+    let msg = codec.decode(&mut buf).unwrap().unwrap();
+    assert!(matches!(msg, OvpnMessage::Info(_)));
+}
+
+#[test]
+fn management_password_wrong() {
+    let mut codec = OvpnCodec::new();
+
+    let mut buf = BytesMut::from("ENTER PASSWORD:\n");
+    let msg = codec.decode(&mut buf).unwrap().unwrap();
+    assert!(matches!(msg, OvpnMessage::PasswordPrompt));
+
+    let mut enc_buf = BytesMut::new();
+    codec
+        .encode(OvpnCommand::ManagementPassword("wrong".into()), &mut enc_buf)
+        .unwrap();
+
+    buf.extend_from_slice(b"ERROR: bad password\n");
+    let msg = codec.decode(&mut buf).unwrap().unwrap();
+    assert!(matches!(msg, OvpnMessage::Error(ref s) if s.contains("bad password")));
+}
+
 #[test]
 fn partial_multiline_response() {
     let mut codec = OvpnCodec::new();

@@ -311,6 +311,11 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 write_line(dst, &format!("proxy SOCKS {host} {port}"))
             }
 
+            // ── Management interface auth ─────────────────────────
+            // Bare line, no quoting — the management password protocol
+            // does not use the config-file lexer.
+            OvpnCommand::ManagementPassword(ref pw) => write_line(dst, pw),
+
             // ── Lifecycle ────────────────────────────────────────
             OvpnCommand::Exit => write_line(dst, "exit"),
             OvpnCommand::Quit => write_line(dst, "quit"),
@@ -431,6 +436,11 @@ impl Decoder for OvpnCodec {
                 return Ok(Some(OvpnMessage::Error(
                     rest.strip_prefix(' ').unwrap_or(rest).to_owned(),
                 )));
+            }
+
+            // Management interface password prompt (no `>` prefix).
+            if line == "ENTER PASSWORD:" {
+                return Ok(Some(OvpnMessage::PasswordPrompt));
             }
 
             // Real-time notifications.

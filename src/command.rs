@@ -300,6 +300,13 @@ pub enum OvpnCommand {
     /// Wire: `bypass-message "message"`
     BypassMessage(String),
 
+    // ── Management interface authentication ────────────────────────
+    /// Authenticate to the management interface itself. Sent as a bare
+    /// line (no command prefix, no quoting) in response to
+    /// [`crate::OvpnMessage::PasswordPrompt`].
+    /// Wire: `{password}\n`
+    ManagementPassword(String),
+
     // ── Session lifecycle ────────────────────────────────────────
     /// Close the management session. OpenVPN keeps running and resumes
     /// listening for new management connections.

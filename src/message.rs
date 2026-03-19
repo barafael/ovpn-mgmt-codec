@@ -213,6 +213,12 @@ pub enum OvpnMessage {
     /// the first thing you see and is useful for version detection.
     Info(String),
 
+    /// Management interface password prompt. Sent when `--management` is
+    /// configured with a password file. The client must respond with the
+    /// password (via [`crate::OvpnCommand::ManagementPassword`]) before any
+    /// commands are accepted.
+    PasswordPrompt,
+
     /// A line that could not be classified into any known message type.
     /// Contains the raw line and a description of what went wrong.
     Unrecognized {
