@@ -10,8 +10,10 @@ pub enum StatusFormat {
     /// Default human-readable format.
     #[default]
     V1,
+
     /// Adds header/footer markers for easier parsing.
     V2,
+
     /// Tab-delimited, ideal for programmatic consumption.
     V3,
 }

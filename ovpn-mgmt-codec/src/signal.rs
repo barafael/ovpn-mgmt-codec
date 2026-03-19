@@ -6,10 +6,13 @@ use std::fmt;
 pub enum Signal {
     /// Soft restart — re-read config, renegotiate TLS.
     SigHup,
+
     /// Graceful shutdown.
     SigTerm,
+
     /// Conditional restart (only if config changed).
     SigUsr1,
+
     /// Print connection statistics to the log.
     SigUsr2,
 }

@@ -7,14 +7,18 @@ use std::fmt;
 pub enum StreamMode {
     /// Enable real-time notifications.
     On,
+
     /// Disable real-time notifications.
     Off,
+
     /// Dump the entire history buffer.
     All,
+
     /// Atomically enable real-time notifications AND dump history.
     /// This guarantees no messages are missed between the dump and
     /// the start of real-time streaming.
     OnAll,
+
     /// Show the N most recent history entries.
     Recent(u32),
 }

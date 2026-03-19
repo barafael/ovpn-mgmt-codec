@@ -7,12 +7,16 @@ use std::fmt;
 pub enum AuthType {
     /// Standard `--auth-user-pass` credentials. Wire: `"Auth"`.
     Auth,
+
     /// Private key passphrase (encrypted key file). Wire: `"Private Key"`.
     PrivateKey,
+
     /// HTTP proxy credentials. Wire: `"HTTP Proxy"`.
     HttpProxy,
+
     /// SOCKS proxy credentials. Wire: `"SOCKS Proxy"`.
     SocksProxy,
+
     /// Plugin-defined or otherwise unrecognized auth type.
     Custom(String),
 }
@@ -34,8 +38,10 @@ impl fmt::Display for AuthType {
 pub enum AuthRetryMode {
     /// Don't retry — exit on auth failure.
     None,
+
     /// Retry, re-prompting for credentials.
     Interact,
+
     /// Retry without re-prompting.
     NoInteract,
 }

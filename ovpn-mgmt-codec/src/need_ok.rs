@@ -5,6 +5,7 @@ use std::fmt;
 pub enum NeedOkResponse {
     /// Accept the prompt.
     Ok,
+
     /// Reject the prompt.
     Cancel,
 }

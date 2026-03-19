@@ -327,10 +327,13 @@ pub enum OvpnCommand {
 pub(crate) enum ResponseKind {
     /// Expect a `SUCCESS:` or `ERROR:` line.
     SuccessOrError,
+
     /// Expect multiple lines terminated by a bare `END`.
     MultiLine,
+
     /// Expect a single non-SUCCESS/ERROR value line (e.g. bare `hold` → "0").
     SingleValue,
+
     /// No response expected (connection may close).
     NoResponse,
 }

@@ -4,6 +4,7 @@
 pub enum ProxyAction {
     /// Connect directly, no proxy.
     None,
+
     /// Use an HTTP proxy.
     Http {
         /// Proxy hostname or IP.
@@ -14,6 +15,7 @@ pub enum ProxyAction {
         /// authentication with the proxy.
         non_cleartext_only: bool,
     },
+
     /// Use a SOCKS proxy.
     Socks {
         /// Proxy hostname or IP.

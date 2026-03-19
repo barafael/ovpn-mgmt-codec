@@ -5,12 +5,16 @@ use std::fmt;
 pub enum ClientEvent {
     /// A new client is connecting (`>CLIENT:CONNECT`).
     Connect,
+
     /// An existing client is re-authenticating (`>CLIENT:REAUTH`).
     Reauth,
+
     /// A client connection has been fully established (`>CLIENT:ESTABLISHED`).
     Established,
+
     /// A client has disconnected (`>CLIENT:DISCONNECT`).
     Disconnect,
+
     /// An unrecognized event type (forward compatibility).
     Custom(String),
 }

@@ -5,26 +5,37 @@ use std::fmt;
 pub enum OpenVpnState {
     /// Initial connection in progress.
     Connecting,
+
     /// Waiting for initial response from server.
     Wait,
+
     /// Authenticating with server.
     Auth,
+
     /// Downloading configuration from server.
     GetConfig,
+
     /// Assigning IP address to virtual network interface.
     AssignIp,
+
     /// Adding routes to system routing table.
     AddRoutes,
+
     /// Connection established and operational.
     Connected,
+
     /// Connection lost, reconnecting.
     Reconnecting,
+
     /// Graceful exit in progress.
     Exiting,
+
     /// Establishing TCP connection to remote.
     TcpConnect,
+
     /// Resolving remote hostname.
     Resolve,
+
     /// An unrecognized state (forward compatibility).
     Custom(String),
 }
