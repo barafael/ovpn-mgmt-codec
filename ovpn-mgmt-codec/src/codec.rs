@@ -32,11 +32,14 @@ fn quote_and_escape(s: &str) -> String {
     out
 }
 
+use crate::client_event::ClientEvent;
+
 /// Internal state for accumulating multi-line `>CLIENT:` notifications.
 #[derive(Debug)]
 struct ClientNotifAccum {
-    event: String,
-    header_args: String,
+    event: ClientEvent,
+    cid: u64,
+    kid: Option<u64>,
     env: Vec<(String, String)>,
 }
 
@@ -383,7 +386,8 @@ impl Decoder for OvpnCodec {
                         let finished = self.client_notif.take().unwrap();
                         return Ok(Some(OvpnMessage::Notification(Notification::Client {
                             event: finished.event,
-                            header_args: finished.header_args,
+                            cid: finished.cid,
+                            kid: finished.kid,
                             env: finished.env,
                         })));
                     } else {
@@ -528,10 +532,21 @@ impl OvpnCodec {
             }
 
             // CONNECT, REAUTH, ESTABLISHED, DISCONNECT all have ENV blocks.
+            // Parse CID and optional KID from the args (e.g. "0,1" or "5").
+            // Some events (e.g. CR_RESPONSE) have extra trailing data after
+            // CID,KID — we use splitn(3) and only parse the first two.
+            let mut id_parts = args.splitn(3, ',');
+            let cid = id_parts
+                .next()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            let kid = id_parts.next().and_then(|s| s.parse().ok());
+
             // Start accumulation — don't emit anything yet.
             self.client_notif = Some(ClientNotifAccum {
-                event,
-                header_args: args,
+                event: ClientEvent::parse(&event),
+                cid,
+                kid,
                 env: Vec::new(),
             });
             return None; // Signal to the caller to keep reading.
@@ -579,13 +594,18 @@ impl OvpnCodec {
 // produce an error.
 
 fn parse_state(payload: &str) -> Option<Notification> {
-    let mut parts = payload.splitn(8, ',');
+    // Wire format (OpenVPN 2.1+):
+    //   timestamp,name,desc,local_ip,remote_ip[,local_port[,local_addr[,remote_port]]]
+    // Field 7 (local_addr) was added later; we skip it since the
+    // Notification::State struct doesn't model it.
+    let mut parts = payload.splitn(9, ',');
     let timestamp = parts.next()?.parse().ok()?;
     let name = parts.next()?.to_owned();
     let description = parts.next()?.to_owned();
     let local_ip = parts.next()?.to_owned();
     let remote_ip = parts.next()?.to_owned();
     let local_port = parts.next().unwrap_or("").to_owned();
+    let _local_addr = parts.next(); // skip local_addr
     let remote_port = parts.next().unwrap_or("").to_owned();
     Some(Notification::State {
         timestamp,
@@ -791,6 +811,7 @@ fn parse_password(payload: &str) -> Option<Notification> {
 mod tests {
     use super::*;
     use crate::auth::AuthType;
+    use crate::client_event::ClientEvent;
     use crate::message::PasswordNotification;
     use crate::signal::Signal;
     use crate::status_format::StatusFormat;
@@ -1156,11 +1177,13 @@ mod tests {
         match &msgs[0] {
             OvpnMessage::Notification(Notification::Client {
                 event,
-                header_args,
+                cid,
+                kid,
                 env,
             }) => {
-                assert_eq!(event, "CONNECT");
-                assert_eq!(header_args, "0,1");
+                assert_eq!(*event, ClientEvent::Connect);
+                assert_eq!(*cid, 0);
+                assert_eq!(*kid, Some(1));
                 assert_eq!(env.len(), 2);
                 assert_eq!(env[0], ("untrusted_ip".to_owned(), "1.2.3.4".to_owned()));
                 assert_eq!(env[1], ("common_name".to_owned(), "TestClient".to_owned()));
@@ -1193,8 +1216,10 @@ mod tests {
         let msgs = decode_all(input);
         assert_eq!(msgs.len(), 1);
         match &msgs[0] {
-            OvpnMessage::Notification(Notification::Client { event, env, .. }) => {
-                assert_eq!(event, "DISCONNECT");
+            OvpnMessage::Notification(Notification::Client { event, cid, kid, env }) => {
+                assert_eq!(*event, ClientEvent::Disconnect);
+                assert_eq!(*cid, 5);
+                assert_eq!(*kid, None);
                 assert_eq!(env.len(), 2);
             }
             other => panic!("unexpected: {other:?}"),

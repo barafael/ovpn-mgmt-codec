@@ -5,6 +5,8 @@
 
 /// Authentication credential types and retry strategies.
 pub mod auth;
+/// Client notification event types (CONNECT, REAUTH, etc.).
+pub mod client_event;
 /// The [`OvpnCodec`] encoder/decoder implementation.
 pub mod codec;
 /// Typed management-interface commands ([`OvpnCommand`]).
@@ -29,6 +31,7 @@ pub mod stream_mode;
 pub mod unrecognized;
 
 pub use auth::{AuthRetryMode, AuthType};
+pub use client_event::ClientEvent;
 pub use codec::OvpnCodec;
 pub use command::OvpnCommand;
 pub use kill_target::KillTarget;

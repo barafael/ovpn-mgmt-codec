@@ -1,4 +1,5 @@
 use crate::auth::AuthType;
+use crate::client_event::ClientEvent;
 
 /// Sub-types of `>PASSWORD:` notifications. The password notification
 /// has several distinct forms with completely different structures.
@@ -47,10 +48,12 @@ pub enum Notification {
     /// DISCONNECT). The header and all ENV key=value pairs are accumulated
     /// into a single struct before this is emitted.
     Client {
-        /// Sub-type: `"CONNECT"`, `"REAUTH"`, `"ESTABLISHED"`, `"DISCONNECT"`.
-        event: String,
-        /// Everything after the event keyword on the header line (CID, KID, etc.).
-        header_args: String,
+        /// The client event sub-type.
+        event: ClientEvent,
+        /// Client ID (sequential, assigned by OpenVPN).
+        cid: u64,
+        /// Key ID (present for CONNECT/REAUTH, absent for ESTABLISHED/DISCONNECT).
+        kid: Option<u64>,
         /// Accumulated ENV pairs, in order. Each `>CLIENT:ENV,key=val` line
         /// becomes one `(key, val)` entry. The terminating `>CLIENT:ENV,END`
         /// is consumed but not included.
