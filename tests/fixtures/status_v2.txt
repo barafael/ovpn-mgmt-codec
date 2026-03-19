@@ -1,0 +1,6 @@
+HEADER,CLIENT_LIST,Common Name,Real Address,Virtual Address,Virtual IPv6 Address,Bytes Received,Bytes Sent,Connected Since,Connected Since (time_t),Username,Client ID,Peer ID,Data Channel Cipher
+CLIENT_LIST,client1,203.0.113.10:52841,10.8.0.6,,1548576,984320,2024-03-21 09:15:00,1711012500,UNDEF,0,0,AES-256-GCM
+HEADER,ROUTING_TABLE,Virtual Address,Common Name,Real Address,Last Ref,Last Ref (time_t)
+ROUTING_TABLE,10.8.0.6,client1,203.0.113.10:52841,2024-03-21 14:29:50,1711031390
+GLOBAL_STATS,Max bcast/mcast queue length,3
+END

@@ -1,0 +1,33 @@
+Management Interface for OpenVPN 2.6.8 [64-bit]
+Commands:
+auth-retry t           : Auth failure retry mode (none,interact,nointeract).
+bytecount n            : Show bytes in/out, update every n secs (0=off).
+echo [on|off] [N|all]  : Like log, but show messages in echo buffer.
+exit|quit              : Close management session.
+forget-passwords       : Forget passwords entered so far.
+help                   : Print this message.
+hold [on|off|release]  : Set/show hold flag to on/off state.
+kill cn                : Kill the client instance(s) having common name cn.
+kill IP:port           : Kill the client instance connecting from IP:port.
+log [on|off] [N|all]   : Turn on/off realtime log display.
+mute [n]               : Set log mute level to n.
+needok type action     : Enter confirmation for >NEEDOK request.
+needstr type action    : Enter confirmation for >NEEDSTR request.
+net                    : (Windows only) Show network info.
+password type p        : Enter password p for a queried OpenVPN password.
+remote type [host port]: Override remote directive.
+pid                    : Show process ID of the current OpenVPN process.
+pkcs11-id-count        : Get number of available PKCS#11 identities.
+pkcs11-id-get index    : Get PKCS#11 identity at index.
+client-auth CID KID    : Authenticate client-id/key-id CID/KID (MULTILINE).
+client-auth-nt CID KID : Authenticate client-id/key-id CID/KID.
+client-deny CID KID R [CR] : Deny auth client-id/key-id CID/KID.
+client-kill CID [M]    : Kill client instance CID.
+client-pf CID          : Define packet filter for client CID (MULTILINE).
+signal s               : Send signal s to daemon.
+state [on|off] [N|all] : Like log, but show state history.
+status [n]             : Show current daemon status info using format #n.
+username type u        : Enter username u for a queried OpenVPN username.
+verb [n]               : Set log verbosity level to n.
+version                : Show current version number.
+END

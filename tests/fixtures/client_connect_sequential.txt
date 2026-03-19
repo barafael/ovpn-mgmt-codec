@@ -1,0 +1,6 @@
+>CLIENT:CONNECT,0,1
+>CLIENT:ENV,common_name=alice
+>CLIENT:ENV,END
+>CLIENT:CONNECT,1,1
+>CLIENT:ENV,common_name=bob
+>CLIENT:ENV,END

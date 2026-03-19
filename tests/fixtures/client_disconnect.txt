@@ -1,0 +1,7 @@
+>CLIENT:DISCONNECT,5
+>CLIENT:ENV,common_name=client2.example.com
+>CLIENT:ENV,bytes_received=15485760
+>CLIENT:ENV,bytes_sent=9843200
+>CLIENT:ENV,time_duration=18432
+>CLIENT:ENV,time_unix=1711031400
+>CLIENT:ENV,END

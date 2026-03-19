@@ -1,0 +1,5 @@
+>LOG:1711000000,I,Initialization Sequence Completed
+>LOG:1711000001,D,MULTI: multi_create_instance called
+>LOG:1711000002,W,WARNING: --ping should normally be used with --ping-restart
+>LOG:1711000003,N,TLS Error: cannot locate HMAC in incoming packet from [AF_INET]203.0.113.50:1194
+>LOG:1711000004,F,Exiting due to fatal error

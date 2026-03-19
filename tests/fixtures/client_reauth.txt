@@ -1,0 +1,5 @@
+>CLIENT:REAUTH,0,2
+>CLIENT:ENV,untrusted_ip=203.0.113.50
+>CLIENT:ENV,untrusted_port=52841
+>CLIENT:ENV,common_name=client1.example.com
+>CLIENT:ENV,END

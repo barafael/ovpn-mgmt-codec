@@ -1,0 +1,5 @@
+>CLIENT:ESTABLISHED,0
+>CLIENT:ENV,common_name=client1.example.com
+>CLIENT:ENV,ifconfig_pool_remote_ip=10.8.0.6
+>CLIENT:ENV,ifconfig_pool_netmask=255.255.255.0
+>CLIENT:ENV,END
