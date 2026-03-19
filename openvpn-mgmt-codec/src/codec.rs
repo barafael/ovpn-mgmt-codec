@@ -384,27 +384,28 @@ impl Decoder for OvpnCodec {
             // ERROR, other notifications) falls through to normal processing
             // as a defensive measure.
             if let Some(ref mut accum) = self.client_notif
-                && let Some(rest) = line.strip_prefix(">CLIENT:ENV,") {
-                    if rest == "END" {
-                        let finished = self.client_notif.take().unwrap();
-                        return Ok(Some(OvpnMessage::Notification(Notification::Client {
-                            event: finished.event,
-                            cid: finished.cid,
-                            kid: finished.kid,
-                            env: finished.env,
-                        })));
-                    } else {
-                        // Parse "key=value" (value may contain '=').
-                        let (k, v) = match rest.split_once('=') {
-                            Some((k, v)) => (k.to_owned(), v.to_owned()),
-                            None => (rest.to_owned(), String::new()),
-                        };
-                        accum.env.push((k, v));
-                        continue; // Next line.
-                    }
+                && let Some(rest) = line.strip_prefix(">CLIENT:ENV,")
+            {
+                if rest == "END" {
+                    let finished = self.client_notif.take().unwrap();
+                    return Ok(Some(OvpnMessage::Notification(Notification::Client {
+                        event: finished.event,
+                        cid: finished.cid,
+                        kid: finished.kid,
+                        env: finished.env,
+                    })));
+                } else {
+                    // Parse "key=value" (value may contain '=').
+                    let (k, v) = match rest.split_once('=') {
+                        Some((k, v)) => (k.to_owned(), v.to_owned()),
+                        None => (rest.to_owned(), String::new()),
+                    };
+                    accum.env.push((k, v));
+                    continue; // Next line.
                 }
-                // Not a >CLIENT:ENV line — fall through to normal processing.
-                // This handles interleaved notifications or unexpected output.
+            }
+            // Not a >CLIENT:ENV line — fall through to normal processing.
+            // This handles interleaved notifications or unexpected output.
 
             // ── Phase 2: Multi-line command response accumulation ─
             if let Some(ref mut buf) = self.multi_line_buf {
