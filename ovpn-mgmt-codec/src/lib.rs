@@ -17,6 +17,8 @@ pub mod kill_target;
 pub mod message;
 /// Responses to `>NEED-OK:` prompts.
 pub mod need_ok;
+/// OpenVPN connection states (CONNECTING, CONNECTED, etc.).
+pub mod openvpn_state;
 /// Proxy configuration for `>PROXY:` responses.
 pub mod proxy_action;
 /// Remote-override actions for `>REMOTE:` responses.
@@ -37,6 +39,7 @@ pub use command::OvpnCommand;
 pub use kill_target::KillTarget;
 pub use message::{Notification, OvpnMessage, PasswordNotification};
 pub use need_ok::NeedOkResponse;
+pub use openvpn_state::OpenVpnState;
 pub use proxy_action::ProxyAction;
 pub use remote_action::RemoteAction;
 pub use signal::Signal;

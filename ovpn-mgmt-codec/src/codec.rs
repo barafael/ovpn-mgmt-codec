@@ -33,6 +33,7 @@ fn quote_and_escape(s: &str) -> String {
 }
 
 use crate::client_event::ClientEvent;
+use crate::openvpn_state::OpenVpnState;
 
 /// Internal state for accumulating multi-line `>CLIENT:` notifications.
 #[derive(Debug)]
@@ -600,7 +601,7 @@ fn parse_state(payload: &str) -> Option<Notification> {
     // Notification::State struct doesn't model it.
     let mut parts = payload.splitn(9, ',');
     let timestamp = parts.next()?.parse().ok()?;
-    let name = parts.next()?.to_owned();
+    let name = OpenVpnState::parse(parts.next()?);
     let description = parts.next()?.to_owned();
     let local_ip = parts.next()?.to_owned();
     let remote_ip = parts.next()?.to_owned();
@@ -1095,7 +1096,7 @@ mod tests {
                 ..
             }) => {
                 assert_eq!(*timestamp, 1234567890);
-                assert_eq!(name, "CONNECTED");
+                assert_eq!(*name, OpenVpnState::Connected);
                 assert_eq!(description, "SUCCESS");
                 assert_eq!(local_ip, "");
                 assert_eq!(remote_ip, "10.0.0.1");

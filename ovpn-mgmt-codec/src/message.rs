@@ -1,5 +1,6 @@
 use crate::auth::AuthType;
 use crate::client_event::ClientEvent;
+use crate::openvpn_state::OpenVpnState;
 
 /// Sub-types of `>PASSWORD:` notifications. The password notification
 /// has several distinct forms with completely different structures.
@@ -74,8 +75,8 @@ pub enum Notification {
     State {
         /// Unix timestamp of the state change.
         timestamp: u64,
-        /// State name (e.g. `"CONNECTED"`, `"RECONNECTING"`).
-        name: String,
+        /// State name (e.g. `Connected`, `Reconnecting`).
+        name: OpenVpnState,
         /// Verbose description of the state.
         description: String,
         /// Local tunnel IP address (may be empty).
