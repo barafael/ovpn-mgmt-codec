@@ -691,13 +691,26 @@ fn parse_proxy(payload: &str) -> Option<Notification> {
 
 use crate::message::PasswordNotification;
 
+use crate::auth::AuthType;
+
+/// Map a wire auth-type string to the typed enum.
+fn parse_auth_type(s: &str) -> AuthType {
+    match s {
+        "Auth" => AuthType::Auth,
+        "Private Key" => AuthType::PrivateKey,
+        "HTTP Proxy" => AuthType::HttpProxy,
+        "SOCKS Proxy" => AuthType::SocksProxy,
+        other => AuthType::Custom(other.to_owned()),
+    }
+}
+
 fn parse_password(payload: &str) -> Option<Notification> {
     // Verification Failed: 'type'
     if let Some(rest) = payload.strip_prefix("Verification Failed: '") {
         let auth_type = rest.strip_suffix('\'')?;
         return Some(Notification::Password(
             PasswordNotification::VerificationFailed {
-                auth_type: auth_type.to_owned(),
+                auth_type: parse_auth_type(auth_type),
             },
         ));
     }
@@ -705,7 +718,7 @@ fn parse_password(payload: &str) -> Option<Notification> {
     // Need 'type' username/password [SC:...|CRV1:...]
     // Need 'type' password
     let rest = payload.strip_prefix("Need '")?;
-    let (auth_type, rest) = rest.split_once('\'')?;
+    let (auth_type_str, rest) = rest.split_once('\'')?;
     let rest = rest.trim_start();
 
     // Check for challenge-response suffixes
@@ -742,7 +755,7 @@ fn parse_password(payload: &str) -> Option<Notification> {
 
         // Plain username/password request
         return Some(Notification::Password(PasswordNotification::NeedAuth {
-            auth_type: auth_type.to_owned(),
+            auth_type: parse_auth_type(auth_type_str),
         }));
     }
 
@@ -750,7 +763,7 @@ fn parse_password(payload: &str) -> Option<Notification> {
     if rest.starts_with("password") {
         return Some(Notification::Password(
             PasswordNotification::NeedPassword {
-                auth_type: auth_type.to_owned(),
+                auth_type: parse_auth_type(auth_type_str),
             },
         ));
     }
@@ -1180,7 +1193,7 @@ mod tests {
             OvpnMessage::Notification(Notification::Password(
                 PasswordNotification::NeedAuth { auth_type },
             )) => {
-                assert_eq!(auth_type, "Auth");
+                assert_eq!(*auth_type, AuthType::Auth);
             }
             other => panic!("unexpected: {other:?}"),
         }

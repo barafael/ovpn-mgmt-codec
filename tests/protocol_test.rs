@@ -521,7 +521,7 @@ fn password_need_auth() {
         OvpnMessage::Notification(Notification::Password(
             PasswordNotification::NeedAuth { auth_type },
         )) => {
-            assert_eq!(auth_type, "Auth");
+            assert_eq!(*auth_type, AuthType::Auth);
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -535,7 +535,7 @@ fn password_need_private_key() {
         OvpnMessage::Notification(Notification::Password(
             PasswordNotification::NeedPassword { auth_type },
         )) => {
-            assert_eq!(auth_type, "Private Key");
+            assert_eq!(*auth_type, AuthType::PrivateKey);
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -549,7 +549,7 @@ fn password_verification_failed() {
         OvpnMessage::Notification(Notification::Password(
             PasswordNotification::VerificationFailed { auth_type },
         )) => {
-            assert_eq!(auth_type, "Auth");
+            assert_eq!(*auth_type, AuthType::Auth);
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -563,7 +563,7 @@ fn password_verification_failed_private_key() {
         OvpnMessage::Notification(Notification::Password(
             PasswordNotification::VerificationFailed { auth_type },
         )) => {
-            assert_eq!(auth_type, "Private Key");
+            assert_eq!(*auth_type, AuthType::PrivateKey);
         }
         other => panic!("unexpected: {other:?}"),
     }

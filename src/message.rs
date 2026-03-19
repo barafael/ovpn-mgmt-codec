@@ -1,21 +1,23 @@
+use crate::auth::AuthType;
+
 /// Sub-types of `>PASSWORD:` notifications. The password notification
 /// has several distinct forms with completely different structures.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PasswordNotification {
     /// `>PASSWORD:Need 'Auth' username/password`
     NeedAuth {
-        /// The credential set being requested (e.g. `"Auth"`).
-        auth_type: String,
+        /// The credential set being requested.
+        auth_type: AuthType,
     },
     /// `>PASSWORD:Need 'Private Key' password`
     NeedPassword {
-        /// The credential set being requested (e.g. `"Private Key"`).
-        auth_type: String,
+        /// The credential set being requested.
+        auth_type: AuthType,
     },
     /// `>PASSWORD:Verification Failed: 'Auth'`
     VerificationFailed {
         /// The credential set that failed verification.
-        auth_type: String,
+        auth_type: AuthType,
     },
     /// Static challenge: `>PASSWORD:Need 'Auth' username/password SC:{echo},{challenge}`
     StaticChallenge {
