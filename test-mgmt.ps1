@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Launches OpenVPN in held mode (no tunnel, no routing changes) with the
-    management interface on 127.0.0.1:7505, then connects ovpn-mgmt-cli.
+    management interface on 127.0.0.1:7505, then connects openvpn-mgmt-cli.
     OpenVPN is killed automatically when the CLI exits.
 
     Requires an elevated (Administrator) shell because OpenVPN needs it
@@ -64,7 +64,7 @@ Write-Host ""
 
 # --- Build and run the CLI ------------------------------------------------
 try {
-    cargo run -p ovpn-mgmt-cli -- 127.0.0.1:7505
+    cargo run -p openvpn-mgmt-cli -- 127.0.0.1:7505
 }
 finally {
     # Clean up OpenVPN when the CLI exits.

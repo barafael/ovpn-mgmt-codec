@@ -1,4 +1,4 @@
-# ovpn-mgmt-codec
+# openvpn-mgmt-codec
 
 A Rust [`tokio_util::codec`] for the
 [OpenVPN management interface](https://openvpn.net/community-resources/management-interface/)
@@ -25,7 +25,7 @@ Add the crate to your project:
 
 ```toml
 [dependencies]
-ovpn-mgmt-codec = "0.1"
+openvpn-mgmt-codec = "0.1"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 ```
@@ -36,7 +36,7 @@ Then wrap a TCP stream with the codec:
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 use futures::{SinkExt, StreamExt};
-use ovpn_mgmt_codec::{OvpnCodec, OvpnCommand, OvpnMessage, StatusFormat};
+use openvpn_mgmt_codec::{OvpnCodec, OvpnCommand, OvpnMessage, StatusFormat};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

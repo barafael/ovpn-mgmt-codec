@@ -37,9 +37,9 @@ echo "Using OpenVPN: $OPENVPN"
 echo ""
 
 # --- Build the CLI first (as the current user) ----------------------------
-echo "Building ovpn-mgmt-cli..."
-cargo build -p ovpn-mgmt-cli
-CLI="$SCRIPT_DIR/target/debug/ovpn-mgmt-cli"
+echo "Building openvpn-mgmt-cli..."
+cargo build -p openvpn-mgmt-cli
+CLI="$SCRIPT_DIR/target/debug/openvpn-mgmt-cli"
 
 # --- Start OpenVPN (needs root) ------------------------------------------
 echo "Starting OpenVPN (management on 127.0.0.1:7505, held)..."

@@ -9,10 +9,10 @@
 //! via `include_str!` so the test logic stays readable.
 
 use bytes::BytesMut;
-use ovpn_mgmt_codec::ClientEvent;
-use ovpn_mgmt_codec::OpenVpnState;
-use ovpn_mgmt_codec::PasswordNotification;
-use ovpn_mgmt_codec::*;
+use openvpn_mgmt_codec::ClientEvent;
+use openvpn_mgmt_codec::OpenVpnState;
+use openvpn_mgmt_codec::PasswordNotification;
+use openvpn_mgmt_codec::*;
 use tokio_util::codec::{Decoder, Encoder};
 
 // ── Helpers ──────────────────────────────────────────────────────────

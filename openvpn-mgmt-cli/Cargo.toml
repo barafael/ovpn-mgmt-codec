@@ -1,5 +1,5 @@
 [package]
-name = "ovpn-mgmt-cli"
+name = "openvpn-mgmt-cli"
 version = "0.1.0"
 edition = "2024"
 publish = false
@@ -7,6 +7,6 @@ publish = false
 [dependencies]
 anyhow = "1"
 futures = "0.3"
-ovpn-mgmt-codec = { path = "../ovpn-mgmt-codec" }
+openvpn-mgmt-codec = { path = "../openvpn-mgmt-codec" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "io-std"] }
 tokio-util = { version = "0.7.18", features = ["codec"] }

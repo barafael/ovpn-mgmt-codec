@@ -1,4 +1,4 @@
-# ovpn-mgmt-cli
+# openvpn-mgmt-cli
 
 Interactive CLI for the OpenVPN management interface. Connects to a running
 OpenVPN management socket and lets you send typed commands while printing
@@ -7,9 +7,9 @@ decoded messages in real time.
 ## Usage
 
 ```sh
-cargo run -p ovpn-mgmt-cli -- 127.0.0.1:7505
-cargo run -p ovpn-mgmt-cli -- /var/run/openvpn.sock   # Unix socket
-cargo run -p ovpn-mgmt-cli -- --help
+cargo run -p openvpn-mgmt-cli -- 127.0.0.1:7505
+cargo run -p openvpn-mgmt-cli -- /var/run/openvpn.sock   # Unix socket
+cargo run -p openvpn-mgmt-cli -- --help
 ```
 
 The address defaults to `127.0.0.1:7505` if omitted. On Unix, a path to a
@@ -92,7 +92,7 @@ mode, connect the CLI, and clean up on exit:
 2. In another terminal, connect the CLI:
 
    ```sh
-   cargo run -p ovpn-mgmt-cli -- 127.0.0.1:7505
+   cargo run -p openvpn-mgmt-cli -- 127.0.0.1:7505
    ```
 
 ### Things to try

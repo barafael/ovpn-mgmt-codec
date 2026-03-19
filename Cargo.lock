@@ -126,18 +126,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "ovpn-mgmt-cli"
+name = "openvpn-mgmt-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "futures",
- "ovpn-mgmt-codec",
+ "openvpn-mgmt-codec",
  "tokio",
  "tokio-util",
 ]
 
 [[package]]
-name = "ovpn-mgmt-codec"
+name = "openvpn-mgmt-codec"
 version = "0.1.0"
 dependencies = [
  "bytes",

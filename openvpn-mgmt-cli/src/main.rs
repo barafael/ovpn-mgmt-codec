@@ -6,15 +6,15 @@
 //! # Usage
 //!
 //! ```sh
-//! cargo run -p ovpn-mgmt-cli -- 127.0.0.1:7505
-//! cargo run -p ovpn-mgmt-cli -- /var/run/openvpn.sock   # Unix socket
+//! cargo run -p openvpn-mgmt-cli -- 127.0.0.1:7505
+//! cargo run -p openvpn-mgmt-cli -- /var/run/openvpn.sock   # Unix socket
 //! ```
 //!
 //! Once connected, type a command name at the `ovpn>` prompt (e.g. `version`,
 //! `status`, `state on`). Type `help` to list commands, `quit` to disconnect.
 
 use futures::{SinkExt, StreamExt};
-use ovpn_mgmt_codec::{
+use openvpn_mgmt_codec::{
     AuthRetryMode, AuthType, KillTarget, NeedOkResponse, Notification, OvpnCodec, OvpnCommand,
     OvpnMessage, PasswordNotification, ProxyAction, RemoteAction, Signal, StatusFormat, StreamMode,
 };
@@ -30,10 +30,10 @@ use std::path::Path;
 use tokio::net::UnixStream;
 
 const USAGE: &str = "\
-ovpn-mgmt-cli — interactive OpenVPN management interface client
+openvpn-mgmt-cli — interactive OpenVPN management interface client
 
 USAGE:
-    ovpn-mgmt-cli [ADDRESS]
+    openvpn-mgmt-cli [ADDRESS]
 
 ADDRESS defaults to 127.0.0.1:7505.
 On Unix, a path to a Unix domain socket is also accepted.
