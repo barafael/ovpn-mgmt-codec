@@ -171,8 +171,14 @@ pub enum Notification {
 
     /// `>PROXY:proto_num,proto_type,host[,port]`
     Proxy {
-        /// Raw payload after `>PROXY:`.
-        payload: String,
+        /// Numeric protocol identifier.
+        proto_num: String,
+        /// Protocol type (e.g. `"udp"`, `"tcp"`).
+        proto_type: String,
+        /// Server hostname or IP.
+        host: String,
+        /// Server port (may be empty if not provided).
+        port: String,
     },
 
     /// `>PASSWORD:...` — see [`PasswordNotification`] for the sub-types.

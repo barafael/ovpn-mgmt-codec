@@ -736,8 +736,16 @@ fn proxy_notification() {
     let msgs = decode_all(">PROXY:1,udp,vpn.example.com,1194\n");
     assert_eq!(msgs.len(), 1);
     match &msgs[0] {
-        OvpnMessage::Notification(Notification::Proxy { payload }) => {
-            assert_eq!(payload, "1,udp,vpn.example.com,1194");
+        OvpnMessage::Notification(Notification::Proxy {
+            proto_num,
+            proto_type,
+            host,
+            port,
+        }) => {
+            assert_eq!(proto_num, "1");
+            assert_eq!(proto_type, "udp");
+            assert_eq!(host, "vpn.example.com");
+            assert_eq!(port, "1194");
         }
         other => panic!("unexpected: {other:?}"),
     }

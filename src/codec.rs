@@ -554,9 +554,7 @@ impl OvpnCodec {
                 data: payload.to_owned(),
             }),
             "REMOTE" => parse_remote(payload),
-            "PROXY" => Some(Notification::Proxy {
-                payload: payload.to_owned(),
-            }),
+            "PROXY" => parse_proxy(payload),
             "PASSWORD" => parse_password(payload),
             _ => None,
         };
@@ -674,6 +672,20 @@ fn parse_remote(payload: &str) -> Option<Notification> {
         host,
         port,
         protocol,
+    })
+}
+
+fn parse_proxy(payload: &str) -> Option<Notification> {
+    let mut parts = payload.splitn(4, ',');
+    let proto_num = parts.next()?.to_owned();
+    let proto_type = parts.next()?.to_owned();
+    let host = parts.next()?.to_owned();
+    let port = parts.next().unwrap_or("").to_owned();
+    Some(Notification::Proxy {
+        proto_num,
+        proto_type,
+        host,
+        port,
     })
 }
 
