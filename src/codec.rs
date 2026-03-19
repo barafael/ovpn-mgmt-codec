@@ -138,14 +138,14 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 // Values containing special chars must be quoted+escaped:
                 //   username "Auth" "foo\"bar"
                 let escaped = quote_and_escape(value);
-                write_line(dst, &format!("username \"{}\" {escaped}", auth_type.0))
+                write_line(dst, &format!("username \"{auth_type}\" {escaped}"))
             }
             OvpnCommand::Password {
                 ref auth_type,
                 ref value,
             } => {
                 let escaped = quote_and_escape(value);
-                write_line(dst, &format!("password \"{}\" {escaped}", auth_type.0))
+                write_line(dst, &format!("password \"{auth_type}\" {escaped}"))
             }
             OvpnCommand::AuthRetry(mode) => write_line(dst, &format!("auth-retry {mode}")),
             OvpnCommand::ForgetPasswords => write_line(dst, "forget-passwords"),
@@ -550,7 +550,7 @@ mod tests {
         // A password containing a backslash and a double quote must be
         // properly escaped on the wire.
         let wire = encode_to_string(OvpnCommand::Password {
-            auth_type: AuthType::private_key(),
+            auth_type: AuthType::PrivateKey,
             value: r#"foo\"bar"#.to_owned(),
         });
         assert_eq!(wire, "password \"Private Key\" \"foo\\\\\\\"bar\"\n");
@@ -559,7 +559,7 @@ mod tests {
     #[test]
     fn encode_password_simple() {
         let wire = encode_to_string(OvpnCommand::Password {
-            auth_type: AuthType::auth(),
+            auth_type: AuthType::Auth,
             value: "hunter2".to_owned(),
         });
         assert_eq!(wire, "password \"Auth\" \"hunter2\"\n");

@@ -1,6 +1,6 @@
 /// Proxy configuration for the `proxy` command (sent in response to a
 /// `>PROXY:` notification, requires `--management-query-proxy`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProxyAction {
     /// Connect directly, no proxy.
     None,

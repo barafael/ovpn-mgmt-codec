@@ -3,7 +3,7 @@ use std::fmt;
 /// Mode selector for commands that share the on/off/all/on-all/N grammar.
 /// This is used by `log`, `state`, and `echo`, all of which support
 /// identical sub-commands.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamMode {
     /// Enable real-time notifications.
     On,

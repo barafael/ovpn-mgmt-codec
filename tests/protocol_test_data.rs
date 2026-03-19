@@ -822,7 +822,7 @@ fn encode_auth_retry_modes() {
 #[test]
 fn encode_username() {
     let wire = encode_to_string(OvpnCommand::Username {
-        auth_type: AuthType::auth(),
+        auth_type: AuthType::Auth,
         value: "jdoe".into(),
     });
     assert_eq!(wire, "username \"Auth\" \"jdoe\"\n");
@@ -831,7 +831,7 @@ fn encode_username() {
 #[test]
 fn encode_username_with_special_chars() {
     let wire = encode_to_string(OvpnCommand::Username {
-        auth_type: AuthType::auth(),
+        auth_type: AuthType::Auth,
         value: "user \"name\\here".into(),
     });
     assert_eq!(wire, "username \"Auth\" \"user \\\"name\\\\here\"\n");

@@ -1,5 +1,5 @@
 /// How to identify a client to kill (server mode).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KillTarget {
     /// Kill by Common Name from the client's TLS certificate.
     CommonName(String),

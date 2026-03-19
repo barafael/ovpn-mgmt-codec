@@ -1,5 +1,5 @@
 /// A parsed real-time notification from OpenVPN.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Notification {
     /// A multi-line `>CLIENT:` notification (CONNECT, REAUTH, ESTABLISHED,
     /// DISCONNECT). The header and all ENV key=value pairs are accumulated
@@ -35,7 +35,7 @@ pub enum Notification {
 }
 
 /// A fully decoded message from the OpenVPN management interface.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OvpnMessage {
     /// A success response: `SUCCESS: [text]`.
     Success(String),

@@ -1,7 +1,7 @@
 use std::fmt;
 
 /// Response to a `>NEED-OK:` prompt.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NeedOkResponse {
     Ok,
     Cancel,

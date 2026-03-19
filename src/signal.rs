@@ -2,7 +2,7 @@ use std::fmt;
 
 /// Signals that can be sent to the OpenVPN daemon via the management
 /// interface. These are sent as string names, not actual Unix signals.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
     /// Soft restart — re-read config, renegotiate TLS.
     SigHup,

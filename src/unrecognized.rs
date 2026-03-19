@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 /// Describes why a line could not be classified into a known message type.
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum UnrecognizedKind {
     /// A line starting with `>` (notification prefix) but missing the
     /// required `:` separator between the notification type and payload.

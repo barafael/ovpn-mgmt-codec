@@ -5,7 +5,7 @@ use std::fmt;
 /// - V1: default human-readable format
 /// - V2: adds header/footer markers for easier parsing
 /// - V3: tab-delimited, ideal for programmatic consumption
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum StatusFormat {
     #[default]
     V1,

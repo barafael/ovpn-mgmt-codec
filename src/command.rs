@@ -12,7 +12,7 @@ use crate::stream_mode::StreamMode;
 /// The encoder handles all serialization — escaping, quoting, multi-line
 /// block framing — so callers never assemble raw strings. The `Raw` variant
 /// exists as an escape hatch for commands not yet modeled here.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OvpnCommand {
     // ── Informational ────────────────────────────────────────────
     /// Request connection status in the given format.

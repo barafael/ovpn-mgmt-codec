@@ -1,6 +1,6 @@
 /// Action for the `remote` command (sent in response to a `>REMOTE:`
 /// notification, requires `--management-query-remote`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteAction {
     /// Accept the connection entry as-is.
     Accept,
