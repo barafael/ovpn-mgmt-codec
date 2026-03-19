@@ -152,6 +152,24 @@ impl Encoder<OvpnCommand> for OvpnCodec {
             OvpnCommand::AuthRetry(mode) => write_line(dst, &format!("auth-retry {mode}")),
             OvpnCommand::ForgetPasswords => write_line(dst, "forget-passwords"),
 
+            // ── Challenge-response ──────────────────────────────
+            OvpnCommand::ChallengeResponse {
+                ref state_id,
+                ref response,
+            } => {
+                let value = format!("CRV1::{state_id}::{response}");
+                let escaped = quote_and_escape(&value);
+                write_line(dst, &format!("password \"Auth\" {escaped}"))
+            }
+            OvpnCommand::StaticChallengeResponse {
+                ref password_b64,
+                ref response_b64,
+            } => {
+                let value = format!("SCRV1:{password_b64}:{response_b64}");
+                let escaped = quote_and_escape(&value);
+                write_line(dst, &format!("password \"Auth\" {escaped}"))
+            }
+
             // ── Interactive prompts ──────────────────────────────
             OvpnCommand::NeedOk { ref name, response } => {
                 write_line(dst, &format!("needok {name} {response}"))

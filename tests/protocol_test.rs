@@ -1501,6 +1501,44 @@ fn encode_bypass_message_with_special_chars() {
     assert_eq!(wire, "bypass-message \"msg with \\\"quotes\\\"\"\n");
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// Challenge-response auth commands (Phase 4)
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn encode_challenge_response_crv1() {
+    let wire = encode_to_string(OvpnCommand::ChallengeResponse {
+        state_id: "bXlzdGF0ZQ==".into(),
+        response: "123456".into(),
+    });
+    assert_eq!(
+        wire,
+        "password \"Auth\" \"CRV1::bXlzdGF0ZQ==::123456\"\n"
+    );
+}
+
+#[test]
+fn encode_static_challenge_response_scrv1() {
+    let wire = encode_to_string(OvpnCommand::StaticChallengeResponse {
+        password_b64: "cGFzc3dvcmQ=".into(),
+        response_b64: "MTIzNDU2".into(),
+    });
+    assert_eq!(
+        wire,
+        "password \"Auth\" \"SCRV1:cGFzc3dvcmQ=:MTIzNDU2\"\n"
+    );
+}
+
+#[test]
+fn challenge_response_with_special_chars_in_state_id() {
+    let wire = encode_to_string(OvpnCommand::ChallengeResponse {
+        state_id: "abc+def/ghi=".into(),
+        response: "mypin".into(),
+    });
+    // Base64 chars like +/= should pass through unmodified
+    assert!(wire.contains("CRV1::abc+def/ghi=::mypin"));
+}
+
 #[test]
 fn partial_multiline_response() {
     let mut codec = OvpnCodec::new();

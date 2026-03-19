@@ -95,12 +95,22 @@ pub enum OvpnCommand {
     // ── Authentication ───────────────────────────────────────────
     /// Supply a username for the given auth type.
     /// Wire: `username "Auth" myuser`
-    Username { auth_type: AuthType, value: String },
+    Username {
+        /// Which credential set this username belongs to.
+        auth_type: AuthType,
+        /// The username value.
+        value: String,
+    },
 
     /// Supply a password for the given auth type. The value is escaped
     /// and double-quoted per the OpenVPN config-file lexer rules.
     /// Wire: `password "Private Key" "foo\"bar"`
-    Password { auth_type: AuthType, value: String },
+    Password {
+        /// Which credential set this password belongs to.
+        auth_type: AuthType,
+        /// The password value (will be escaped on the wire).
+        value: String,
+    },
 
     /// Set the auth-retry strategy.
     /// Wire: `auth-retry interact`
@@ -110,17 +120,46 @@ pub enum OvpnCommand {
     /// Wire: `forget-passwords`
     ForgetPasswords,
 
+    // ── Challenge-response authentication ────────────────────────
+    /// Respond to a CRV1 dynamic challenge.
+    /// Wire: `password "Auth" "CRV1::state_id::response"`
+    ChallengeResponse {
+        /// The opaque state ID from the `>PASSWORD:` CRV1 notification.
+        state_id: String,
+        /// The user's response to the challenge.
+        response: String,
+    },
+
+    /// Respond to a static challenge (SC).
+    /// Wire: `password "Auth" "SCRV1::base64_password::base64_response"`
+    ///
+    /// The caller must pre-encode password and response as base64 —
+    /// this crate does not include a base64 dependency.
+    StaticChallengeResponse {
+        /// Base64-encoded password.
+        password_b64: String,
+        /// Base64-encoded challenge response.
+        response_b64: String,
+    },
+
     // ── Interactive prompts (OpenVPN 2.1+) ───────────────────────
     /// Respond to a `>NEED-OK:` prompt.
     /// Wire: `needok token-insertion-request ok` / `needok ... cancel`
     NeedOk {
+        /// The prompt name from the `>NEED-OK:` notification.
         name: String,
+        /// Accept or cancel.
         response: NeedOkResponse,
     },
 
     /// Respond to a `>NEED-STR:` prompt with a string value.
     /// Wire: `needstr name "John"`
-    NeedStr { name: String, value: String },
+    NeedStr {
+        /// The prompt name from the `>NEED-STR:` notification.
+        name: String,
+        /// The string value to send (will be escaped on the wire).
+        value: String,
+    },
 
     // ── PKCS#11 (OpenVPN 2.1+) ──────────────────────────────────
     /// Query available PKCS#11 certificate count.
@@ -135,7 +174,10 @@ pub enum OvpnCommand {
     /// Provide an RSA signature in response to `>RSA_SIGN:`.
     /// This is a multi-line command: the encoder writes `rsa-sig`,
     /// then each base64 line, then `END`.
-    RsaSig { base64_lines: Vec<String> },
+    RsaSig {
+        /// Base64-encoded signature lines.
+        base64_lines: Vec<String>,
+    },
 
     // ── Client management (server mode, OpenVPN 2.1+) ────────────
     /// Authorize a `>CLIENT:CONNECT` or `>CLIENT:REAUTH` and push config
@@ -143,20 +185,31 @@ pub enum OvpnCommand {
     /// An empty `config_lines` produces a null block (header + immediate END),
     /// which is equivalent to `client-auth-nt` in effect.
     ClientAuth {
+        /// Client ID from the `>CLIENT:` notification.
         cid: u64,
+        /// Key ID from the `>CLIENT:` notification.
         kid: u64,
+        /// Config directives to push (e.g. `push "route ..."`).
         config_lines: Vec<String>,
     },
 
     /// Authorize a client without pushing any config.
     /// Wire: `client-auth-nt {CID} {KID}`
-    ClientAuthNt { cid: u64, kid: u64 },
+    ClientAuthNt {
+        /// Client ID.
+        cid: u64,
+        /// Key ID.
+        kid: u64,
+    },
 
     /// Deny a `>CLIENT:CONNECT` or `>CLIENT:REAUTH`.
     /// Wire: `client-deny {CID} {KID} "reason" ["client-reason"]`
     ClientDeny {
+        /// Client ID.
         cid: u64,
+        /// Key ID.
         kid: u64,
+        /// Server-side reason string (logged but not sent to client).
         reason: String,
         /// Optional message sent to the client as part of AUTH_FAILED.
         client_reason: Option<String>,
@@ -164,11 +217,19 @@ pub enum OvpnCommand {
 
     /// Immediately kill a client session by CID.
     /// Wire: `client-kill {CID}`
-    ClientKill { cid: u64 },
+    ClientKill {
+        /// Client ID.
+        cid: u64,
+    },
 
     /// Push a packet filter to a specific client. Multi-line command:
     /// header, filter block, `END`. Requires `--management-client-pf`.
-    ClientPf { cid: u64, filter_lines: Vec<String> },
+    ClientPf {
+        /// Client ID.
+        cid: u64,
+        /// Packet filter rules (e.g. `[CLIENTS ACCEPT]`, `+10.0.0.0/8`).
+        filter_lines: Vec<String>,
+    },
 
     // ── Remote/Proxy override ────────────────────────────────────
     /// Respond to a `>REMOTE:` notification (requires `--management-query-remote`).
@@ -189,7 +250,9 @@ pub enum OvpnCommand {
     /// Defer authentication for a client, allowing async auth backends.
     /// Wire: `client-pending-auth {CID} {KID} {TIMEOUT} {EXTRA}`
     ClientPendingAuth {
+        /// Client ID.
         cid: u64,
+        /// Key ID.
         kid: u64,
         /// Timeout in seconds before the pending auth expires.
         timeout: u32,
@@ -200,18 +263,26 @@ pub enum OvpnCommand {
     /// Extended deny with optional redirect URL (OpenVPN 2.5+).
     /// Wire: `client-deny-v2 {CID} {KID} "reason" ["client-reason"] ["redirect-url"]`
     ClientDenyV2 {
+        /// Client ID.
         cid: u64,
+        /// Key ID.
         kid: u64,
+        /// Server-side reason string.
         reason: String,
+        /// Optional message sent to the client.
         client_reason: Option<String>,
+        /// Optional URL the client should be redirected to.
         redirect_url: Option<String>,
     },
 
     /// Respond to a challenge-response authentication (OpenVPN 2.5+).
     /// Wire: `cr-response {CID} {KID} {RESPONSE}`
     CrResponse {
+        /// Client ID.
         cid: u64,
+        /// Key ID.
         kid: u64,
+        /// The challenge-response answer.
         response: String,
     },
 
@@ -219,7 +290,10 @@ pub enum OvpnCommand {
     /// Supply an external certificate in response to `>NEED-CERTIFICATE`.
     /// Multi-line command: header, PEM lines, `END`.
     /// Wire: `certificate\n{pem_lines}\nEND`
-    Certificate { pem_lines: Vec<String> },
+    Certificate {
+        /// PEM-encoded certificate lines.
+        pem_lines: Vec<String>,
+    },
 
     // ── Windows service bypass message ──────────────────────────
     /// (Windows only) Send a bypass message to the OpenVPN service.
