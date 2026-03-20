@@ -31,7 +31,7 @@ impl LogLevel {
             "W" => Self::Warning,
             "N" => Self::NonFatal,
             "F" => Self::Fatal,
-            other => Self::Custom(other.to_owned()),
+            other => Self::Custom(other.to_string()),
         }
     }
 }

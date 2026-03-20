@@ -55,7 +55,7 @@ impl OpenVpnState {
             "EXITING" => Self::Exiting,
             "TCP_CONNECT" => Self::TcpConnect,
             "RESOLVE" => Self::Resolve,
-            other => Self::Custom(other.to_owned()),
+            other => Self::Custom(other.to_string()),
         }
     }
 }

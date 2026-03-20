@@ -106,7 +106,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
             OvpnCommand::Status(StatusFormat::V1) => write_line(dst, "status"),
             OvpnCommand::Status(ref fmt) => write_line(dst, &format!("status {fmt}")),
             OvpnCommand::State => write_line(dst, "state"),
-            OvpnCommand::StateStream(ref m) => write_line(dst, &format!("state {}", m)),
+            OvpnCommand::StateStream(ref m) => write_line(dst, &format!("state {m}")),
             OvpnCommand::Version => write_line(dst, "version"),
             OvpnCommand::Pid => write_line(dst, "pid"),
             OvpnCommand::Help => write_line(dst, "help"),
@@ -117,17 +117,17 @@ impl Encoder<OvpnCommand> for OvpnCodec {
             OvpnCommand::Mute(None) => write_line(dst, "mute"),
 
             // ── Real-time notification control ───────────────────
-            OvpnCommand::Log(ref m) => write_line(dst, &format!("log {}", m)),
-            OvpnCommand::Echo(ref m) => write_line(dst, &format!("echo {}", m)),
+            OvpnCommand::Log(ref m) => write_line(dst, &format!("log {m}")),
+            OvpnCommand::Echo(ref m) => write_line(dst, &format!("echo {m}")),
             OvpnCommand::ByteCount(n) => write_line(dst, &format!("bytecount {n}")),
 
             // ── Connection control ───────────────────────────────
             OvpnCommand::Signal(sig) => write_line(dst, &format!("signal {sig}")),
             OvpnCommand::Kill(KillTarget::CommonName(ref cn)) => {
-                write_line(dst, &format!("kill {cn}"))
+                write_line(dst, &format!("kill {cn}"));
             }
             OvpnCommand::Kill(KillTarget::Address { ref ip, port }) => {
-                write_line(dst, &format!("kill {ip}:{port}"))
+                write_line(dst, &format!("kill {ip}:{port}"));
             }
             OvpnCommand::HoldQuery => write_line(dst, "hold"),
             OvpnCommand::HoldOn => write_line(dst, "hold on"),
@@ -146,14 +146,14 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 // Values containing special chars must be quoted+escaped:
                 //   username "Auth" "foo\"bar"
                 let escaped = quote_and_escape(value);
-                write_line(dst, &format!("username \"{auth_type}\" {escaped}"))
+                write_line(dst, &format!("username \"{auth_type}\" {escaped}"));
             }
             OvpnCommand::Password {
                 ref auth_type,
                 ref value,
             } => {
                 let escaped = quote_and_escape(value);
-                write_line(dst, &format!("password \"{auth_type}\" {escaped}"))
+                write_line(dst, &format!("password \"{auth_type}\" {escaped}"));
             }
             OvpnCommand::AuthRetry(mode) => write_line(dst, &format!("auth-retry {mode}")),
             OvpnCommand::ForgetPasswords => write_line(dst, "forget-passwords"),
@@ -165,7 +165,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
             } => {
                 let value = format!("CRV1::{state_id}::{response}");
                 let escaped = quote_and_escape(&value);
-                write_line(dst, &format!("password \"Auth\" {escaped}"))
+                write_line(dst, &format!("password \"Auth\" {escaped}"));
             }
             OvpnCommand::StaticChallengeResponse {
                 ref password_b64,
@@ -173,19 +173,19 @@ impl Encoder<OvpnCommand> for OvpnCodec {
             } => {
                 let value = format!("SCRV1:{password_b64}:{response_b64}");
                 let escaped = quote_and_escape(&value);
-                write_line(dst, &format!("password \"Auth\" {escaped}"))
+                write_line(dst, &format!("password \"Auth\" {escaped}"));
             }
 
             // ── Interactive prompts ──────────────────────────────
             OvpnCommand::NeedOk { ref name, response } => {
-                write_line(dst, &format!("needok {name} {response}"))
+                write_line(dst, &format!("needok {name} {response}"));
             }
             OvpnCommand::NeedStr {
                 ref name,
                 ref value,
             } => {
                 let escaped = quote_and_escape(value);
-                write_line(dst, &format!("needstr {name} {escaped}"))
+                write_line(dst, &format!("needstr {name} {escaped}"));
             }
 
             // ── PKCS#11 ─────────────────────────────────────────
@@ -215,7 +215,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
             } => write_block(dst, &format!("client-auth {cid} {kid}"), config_lines),
 
             OvpnCommand::ClientAuthNt { cid, kid } => {
-                write_line(dst, &format!("client-auth-nt {cid} {kid}"))
+                write_line(dst, &format!("client-auth-nt {cid} {kid}"));
             }
 
             OvpnCommand::ClientDeny {
@@ -228,7 +228,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 match client_reason {
                     Some(cr) => {
                         let cr_esc = quote_and_escape(cr);
-                        write_line(dst, &format!("client-deny {cid} {kid} {r} {cr_esc}"))
+                        write_line(dst, &format!("client-deny {cid} {kid} {r} {cr_esc}"));
                     }
                     None => write_line(dst, &format!("client-deny {cid} {kid} {r}")),
                 }
@@ -278,7 +278,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                         cmd.push_str(&quote_and_escape(url));
                     }
                 }
-                write_line(dst, &cmd)
+                write_line(dst, &cmd);
             }
 
             OvpnCommand::CrResponse {
@@ -289,20 +289,20 @@ impl Encoder<OvpnCommand> for OvpnCodec {
 
             // ── External certificate ─────────────────────────────
             OvpnCommand::Certificate { ref pem_lines } => {
-                write_block(dst, "certificate", pem_lines)
+                write_block(dst, "certificate", pem_lines);
             }
 
             // ── Windows service bypass ───────────────────────────
             OvpnCommand::BypassMessage(ref msg) => {
                 let escaped = quote_and_escape(msg);
-                write_line(dst, &format!("bypass-message {escaped}"))
+                write_line(dst, &format!("bypass-message {escaped}"));
             }
 
             // ── Remote/Proxy ─────────────────────────────────────
             OvpnCommand::Remote(RemoteAction::Accept) => write_line(dst, "remote ACCEPT"),
             OvpnCommand::Remote(RemoteAction::Skip) => write_line(dst, "remote SKIP"),
             OvpnCommand::Remote(RemoteAction::Modify { ref host, port }) => {
-                write_line(dst, &format!("remote MOD {host} {port}"))
+                write_line(dst, &format!("remote MOD {host} {port}"));
             }
             OvpnCommand::Proxy(ProxyAction::None) => write_line(dst, "proxy NONE"),
             OvpnCommand::Proxy(ProxyAction::Http {
@@ -311,10 +311,10 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 non_cleartext_only,
             }) => {
                 let nct = if non_cleartext_only { " nct" } else { "" };
-                write_line(dst, &format!("proxy HTTP {host} {port}{nct}"))
+                write_line(dst, &format!("proxy HTTP {host} {port}{nct}"));
             }
             OvpnCommand::Proxy(ProxyAction::Socks { ref host, port }) => {
-                write_line(dst, &format!("proxy SOCKS {host} {port}"))
+                write_line(dst, &format!("proxy SOCKS {host} {port}"));
             }
 
             // ── Management interface auth ─────────────────────────
@@ -363,9 +363,8 @@ impl Decoder for OvpnCodec {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         loop {
             // Find the next complete line.
-            let newline_pos = match src.iter().position(|&b| b == b'\n') {
-                Some(pos) => pos,
-                None => return Ok(None), // Need more data.
+            let Some(newline_pos) = src.iter().position(|&b| b == b'\n') else {
+                return Ok(None); // Need more data.
             };
 
             // Extract the line and advance the buffer past the newline.
@@ -373,7 +372,7 @@ impl Decoder for OvpnCodec {
             let line = std::str::from_utf8(&line_bytes)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
                 .trim_end_matches(['\r', '\n'])
-                .to_owned();
+                .to_string();
 
             // ── Phase 1: Multi-line >CLIENT: accumulation ────────
             //
@@ -387,7 +386,7 @@ impl Decoder for OvpnCodec {
                 && let Some(rest) = line.strip_prefix(">CLIENT:ENV,")
             {
                 if rest == "END" {
-                    let finished = self.client_notif.take().unwrap();
+                    let finished = self.client_notif.take().expect("guarded by if-let");
                     return Ok(Some(OvpnMessage::Notification(Notification::Client {
                         event: finished.event,
                         cid: finished.cid,
@@ -396,10 +395,10 @@ impl Decoder for OvpnCodec {
                     })));
                 } else {
                     // Parse "key=value" (value may contain '=').
-                    let (k, v) = match rest.split_once('=') {
-                        Some((k, v)) => (k.to_owned(), v.to_owned()),
-                        None => (rest.to_owned(), String::new()),
-                    };
+                    let (k, v) = rest
+                        .split_once('=')
+                        .map(|(k, v)| (k.to_string(), v.to_string()))
+                        .unwrap_or_else(|| (rest.to_string(), String::new()));
                     accum.env.push((k, v));
                     continue; // Next line.
                 }
@@ -410,7 +409,7 @@ impl Decoder for OvpnCodec {
             // ── Phase 2: Multi-line command response accumulation ─
             if let Some(ref mut buf) = self.multi_line_buf {
                 if line == "END" {
-                    let lines = self.multi_line_buf.take().unwrap();
+                    let lines = self.multi_line_buf.take().expect("guarded by if-let");
                     return Ok(Some(OvpnMessage::MultiLine(lines)));
                 }
                 // The spec only guarantees atomicity for CLIENT notifications,
@@ -436,12 +435,12 @@ impl Decoder for OvpnCodec {
             // "SUCCESS: [text]" but text could be empty.
             if let Some(rest) = line.strip_prefix("SUCCESS:") {
                 return Ok(Some(OvpnMessage::Success(
-                    rest.strip_prefix(' ').unwrap_or(rest).to_owned(),
+                    rest.strip_prefix(' ').unwrap_or(rest).to_string(),
                 )));
             }
             if let Some(rest) = line.strip_prefix("ERROR:") {
                 return Ok(Some(OvpnMessage::Error(
-                    rest.strip_prefix(' ').unwrap_or(rest).to_owned(),
+                    rest.strip_prefix(' ').unwrap_or(rest).to_string(),
                 )));
             }
 
@@ -497,35 +496,32 @@ impl OvpnCodec {
     fn parse_notification(&mut self, line: &str) -> Option<OvpnMessage> {
         let inner = &line[1..]; // Strip leading `>`
 
-        let (kind, payload) = match inner.split_once(':') {
-            Some((k, p)) => (k, p),
+        let Some((kind, payload)) = inner.split_once(':') else {
             // Malformed notification — no colon.
-            None => {
-                return Some(OvpnMessage::Unrecognized {
-                    line: line.to_owned(),
-                    kind: UnrecognizedKind::MalformedNotification,
-                });
-            }
+            return Some(OvpnMessage::Unrecognized {
+                line: line.to_string(),
+                kind: UnrecognizedKind::MalformedNotification,
+            });
         };
 
         // >INFO: gets its own message variant for convenience (it's always
         // the first thing you see on connect).
         if kind == "INFO" {
-            return Some(OvpnMessage::Info(payload.to_owned()));
+            return Some(OvpnMessage::Info(payload.to_string()));
         }
 
         // >CLIENT: may be multi-line. Inspect the sub-type to decide.
         if kind == "CLIENT" {
-            let (event, args) = match payload.split_once(',') {
-                Some((e, a)) => (e.to_owned(), a.to_owned()),
-                None => (payload.to_owned(), String::new()),
-            };
+            let (event, args) = payload
+                .split_once(',')
+                .map(|(e, a)| (e.to_string(), a.to_string()))
+                .unwrap_or_else(|| (payload.to_string(), String::new()));
 
             // ADDRESS notifications are always single-line (no ENV block).
             if event == "ADDRESS" {
                 let mut parts = args.splitn(3, ',');
                 let cid = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-                let addr = parts.next().unwrap_or("").to_owned();
+                let addr = parts.next().unwrap_or("").to_string();
                 let primary = parts.next() == Some("1");
                 return Some(OvpnMessage::Notification(Notification::ClientAddress {
                     cid,
@@ -560,16 +556,16 @@ impl OvpnCodec {
             "LOG" => parse_log(payload),
             "ECHO" => parse_echo(payload),
             "HOLD" => Some(Notification::Hold {
-                text: payload.to_owned(),
+                text: payload.to_string(),
             }),
             "FATAL" => Some(Notification::Fatal {
-                message: payload.to_owned(),
+                message: payload.to_string(),
             }),
             "PKCS11ID-COUNT" => parse_pkcs11id_count(payload),
             "NEED-OK" => parse_need_ok(payload),
             "NEED-STR" => parse_need_str(payload),
             "RSA_SIGN" => Some(Notification::RsaSign {
-                data: payload.to_owned(),
+                data: payload.to_string(),
             }),
             "REMOTE" => parse_remote(payload),
             "PROXY" => parse_proxy(payload),
@@ -579,8 +575,8 @@ impl OvpnCodec {
 
         Some(OvpnMessage::Notification(notification.unwrap_or(
             Notification::Simple {
-                kind: kind.to_owned(),
-                payload: payload.to_owned(),
+                kind: kind.to_string(),
+                payload: payload.to_string(),
             },
         )))
     }
@@ -601,12 +597,12 @@ fn parse_state(payload: &str) -> Option<Notification> {
     let mut parts = payload.splitn(9, ',');
     let timestamp = parts.next()?.parse().ok()?;
     let name = OpenVpnState::parse(parts.next()?);
-    let description = parts.next()?.to_owned();
-    let local_ip = parts.next()?.to_owned();
-    let remote_ip = parts.next()?.to_owned();
-    let local_port = parts.next().unwrap_or("").to_owned();
+    let description = parts.next()?.to_string();
+    let local_ip = parts.next()?.to_string();
+    let remote_ip = parts.next()?.to_string();
+    let local_port = parts.next().unwrap_or("").to_string();
     let _local_addr = parts.next(); // skip local_addr
-    let remote_port = parts.next().unwrap_or("").to_owned();
+    let remote_port = parts.next().unwrap_or("").to_string();
     Some(Notification::State {
         timestamp,
         name,
@@ -645,7 +641,7 @@ fn parse_log(payload: &str) -> Option<Notification> {
     Some(Notification::Log {
         timestamp,
         level: LogLevel::parse(level_str),
-        message: message.to_owned(),
+        message: message.to_string(),
     })
 }
 
@@ -654,7 +650,7 @@ fn parse_echo(payload: &str) -> Option<Notification> {
     let timestamp = ts_str.parse().ok()?;
     Some(Notification::Echo {
         timestamp,
-        param: param.to_owned(),
+        param: param.to_string(),
     })
 }
 
@@ -670,9 +666,9 @@ fn parse_pkcs11id_entry(line: &str) -> Option<OvpnMessage> {
     let (id, rest) = rest.split_once("', BLOB:'")?;
     let blob = rest.strip_suffix('\'')?;
     Some(OvpnMessage::Pkcs11IdEntry {
-        index: index.to_owned(),
-        id: id.to_owned(),
-        blob: blob.to_owned(),
+        index: index.to_string(),
+        id: id.to_string(),
+        blob: blob.to_string(),
     })
 }
 
@@ -683,8 +679,8 @@ fn parse_need_ok(payload: &str) -> Option<Notification> {
     let (name, rest) = rest.split_once('\'')?;
     let msg = rest.split_once("MSG:")?.1;
     Some(Notification::NeedOk {
-        name: name.to_owned(),
-        message: msg.to_owned(),
+        name: name.to_string(),
+        message: msg.to_string(),
     })
 }
 
@@ -694,14 +690,14 @@ fn parse_need_str(payload: &str) -> Option<Notification> {
     let (name, rest) = rest.split_once('\'')?;
     let msg = rest.split_once("MSG:")?.1;
     Some(Notification::NeedStr {
-        name: name.to_owned(),
-        message: msg.to_owned(),
+        name: name.to_string(),
+        message: msg.to_string(),
     })
 }
 
 fn parse_remote(payload: &str) -> Option<Notification> {
     let mut parts = payload.splitn(3, ',');
-    let host = parts.next()?.to_owned();
+    let host = parts.next()?.to_string();
     let port = parts.next()?.parse().ok()?;
     let protocol = TransportProtocol::parse(parts.next()?);
     Some(Notification::Remote {
@@ -715,7 +711,7 @@ fn parse_proxy(payload: &str) -> Option<Notification> {
     let mut parts = payload.splitn(4, ',');
     let proto_num = parts.next()?.parse().ok()?;
     let proto_type = TransportProtocol::parse(parts.next()?);
-    let host = parts.next()?.to_owned();
+    let host = parts.next()?.to_string();
     let port = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
     Some(Notification::Proxy {
         proto_num,
@@ -736,7 +732,7 @@ fn parse_auth_type(s: &str) -> AuthType {
         "Private Key" => AuthType::PrivateKey,
         "HTTP Proxy" => AuthType::HttpProxy,
         "SOCKS Proxy" => AuthType::SocksProxy,
-        other => AuthType::Custom(other.to_owned()),
+        other => AuthType::Custom(other.to_string()),
     }
 }
 
@@ -767,7 +763,7 @@ fn parse_password(payload: &str) -> Option<Notification> {
             return Some(Notification::Password(
                 PasswordNotification::StaticChallenge {
                     echo: echo_str == "1",
-                    challenge: challenge.to_owned(),
+                    challenge: challenge.to_string(),
                 },
             ));
         }
@@ -775,10 +771,10 @@ fn parse_password(payload: &str) -> Option<Notification> {
         // Dynamic challenge: CRV1:flags:state_id:username_b64:challenge
         if let Some(crv1) = after_up.strip_prefix("CRV1:") {
             let mut parts = crv1.splitn(4, ':');
-            let flags = parts.next()?.to_owned();
-            let state_id = parts.next()?.to_owned();
-            let username_b64 = parts.next()?.to_owned();
-            let challenge = parts.next()?.to_owned();
+            let flags = parts.next()?.to_string();
+            let state_id = parts.next()?.to_string();
+            let username_b64 = parts.next()?.to_string();
+            let challenge = parts.next()?.to_string();
             return Some(Notification::Password(
                 PasswordNotification::DynamicChallenge {
                     flags,
@@ -897,7 +893,7 @@ mod tests {
         // properly escaped on the wire.
         let wire = encode_to_string(OvpnCommand::Password {
             auth_type: AuthType::PrivateKey,
-            value: r#"foo\"bar"#.to_owned(),
+            value: r#"foo\"bar"#.to_string(),
         });
         assert_eq!(wire, "password \"Private Key\" \"foo\\\\\\\"bar\"\n");
     }
@@ -906,7 +902,7 @@ mod tests {
     fn encode_password_simple() {
         let wire = encode_to_string(OvpnCommand::Password {
             auth_type: AuthType::Auth,
-            value: "hunter2".to_owned(),
+            value: "hunter2".to_string(),
         });
         assert_eq!(wire, "password \"Auth\" \"hunter2\"\n");
     }
@@ -917,8 +913,8 @@ mod tests {
             cid: 42,
             kid: 0,
             config_lines: vec![
-                "push \"route 10.0.0.0 255.255.0.0\"".to_owned(),
-                "push \"dhcp-option DNS 10.0.0.1\"".to_owned(),
+                "push \"route 10.0.0.0 255.255.0.0\"".to_string(),
+                "push \"dhcp-option DNS 10.0.0.1\"".to_string(),
             ],
         });
         assert_eq!(
@@ -945,8 +941,8 @@ mod tests {
         let wire = encode_to_string(OvpnCommand::ClientDeny {
             cid: 5,
             kid: 0,
-            reason: "cert revoked".to_owned(),
-            client_reason: Some("Your access has been revoked.".to_owned()),
+            reason: "cert revoked".to_string(),
+            client_reason: Some("Your access has been revoked.".to_string()),
         });
         assert_eq!(
             wire,
@@ -957,7 +953,7 @@ mod tests {
     #[test]
     fn encode_rsa_sig() {
         let wire = encode_to_string(OvpnCommand::RsaSig {
-            base64_lines: vec!["AAAA".to_owned(), "BBBB".to_owned()],
+            base64_lines: vec!["AAAA".to_string(), "BBBB".to_string()],
         });
         assert_eq!(wire, "rsa-sig\nAAAA\nBBBB\nEND\n");
     }
@@ -965,7 +961,7 @@ mod tests {
     #[test]
     fn encode_remote_modify() {
         let wire = encode_to_string(OvpnCommand::Remote(RemoteAction::Modify {
-            host: "vpn.example.com".to_owned(),
+            host: "vpn.example.com".to_string(),
             port: 1234,
         }));
         assert_eq!(wire, "remote MOD vpn.example.com 1234\n");
@@ -974,7 +970,7 @@ mod tests {
     #[test]
     fn encode_proxy_http_nct() {
         let wire = encode_to_string(OvpnCommand::Proxy(ProxyAction::Http {
-            host: "proxy.local".to_owned(),
+            host: "proxy.local".to_string(),
             port: 8080,
             non_cleartext_only: true,
         }));
@@ -985,7 +981,7 @@ mod tests {
     fn encode_needok() {
         use crate::need_ok::NeedOkResponse;
         let wire = encode_to_string(OvpnCommand::NeedOk {
-            name: "token-insertion-request".to_owned(),
+            name: "token-insertion-request".to_string(),
             response: NeedOkResponse::Ok,
         });
         assert_eq!(wire, "needok token-insertion-request ok\n");
@@ -994,8 +990,8 @@ mod tests {
     #[test]
     fn encode_needstr() {
         let wire = encode_to_string(OvpnCommand::NeedStr {
-            name: "name".to_owned(),
-            value: "John".to_owned(),
+            name: "name".to_string(),
+            value: "John".to_string(),
         });
         assert_eq!(wire, "needstr name \"John\"\n");
     }
@@ -1026,11 +1022,11 @@ mod tests {
         let wire = encode_to_string(OvpnCommand::ClientPf {
             cid: 42,
             filter_lines: vec![
-                "[CLIENTS ACCEPT]".to_owned(),
-                "-accounting".to_owned(),
-                "[SUBNETS DROP]".to_owned(),
-                "+10.0.0.0/8".to_owned(),
-                "[END]".to_owned(),
+                "[CLIENTS ACCEPT]".to_string(),
+                "-accounting".to_string(),
+                "[SUBNETS DROP]".to_string(),
+                "+10.0.0.0/8".to_string(),
+                "[END]".to_string(),
             ],
         });
         assert_eq!(
@@ -1186,8 +1182,11 @@ mod tests {
                 assert_eq!(*cid, 0);
                 assert_eq!(*kid, Some(1));
                 assert_eq!(env.len(), 2);
-                assert_eq!(env[0], ("untrusted_ip".to_owned(), "1.2.3.4".to_owned()));
-                assert_eq!(env[1], ("common_name".to_owned(), "TestClient".to_owned()));
+                assert_eq!(env[0], ("untrusted_ip".to_string(), "1.2.3.4".to_string()));
+                assert_eq!(
+                    env[1],
+                    ("common_name".to_string(), "TestClient".to_string())
+                );
             }
             other => panic!("unexpected: {other:?}"),
         }

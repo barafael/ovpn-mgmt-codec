@@ -27,7 +27,7 @@ impl ClientEvent {
             "REAUTH" => Self::Reauth,
             "ESTABLISHED" => Self::Established,
             "DISCONNECT" => Self::Disconnect,
-            other => Self::Custom(other.to_owned()),
+            other => Self::Custom(other.to_string()),
         }
     }
 }

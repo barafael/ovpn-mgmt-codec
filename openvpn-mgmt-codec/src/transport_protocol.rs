@@ -19,7 +19,7 @@ impl TransportProtocol {
         match s {
             "udp" | "UDP" => Self::Udp,
             "tcp" | "TCP" => Self::Tcp,
-            other => Self::Custom(other.to_owned()),
+            other => Self::Custom(other.to_string()),
         }
     }
 }

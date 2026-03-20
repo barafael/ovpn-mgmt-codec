@@ -146,11 +146,11 @@ fn parse_input(line: &str) -> Result<OvpnCommand, String> {
                 && let Ok(port) = port_str.parse::<u16>()
             {
                 return Ok(OvpnCommand::Kill(KillTarget::Address {
-                    ip: ip.to_owned(),
+                    ip: ip.to_string(),
                     port,
                 }));
             }
-            Ok(OvpnCommand::Kill(KillTarget::CommonName(args.to_owned())))
+            Ok(OvpnCommand::Kill(KillTarget::CommonName(args.to_string())))
         }
 
         "hold" => match args {
@@ -168,7 +168,7 @@ fn parse_input(line: &str) -> Result<OvpnCommand, String> {
                 .ok_or("usage: username <auth-type> <value>")?;
             Ok(OvpnCommand::Username {
                 auth_type: parse_auth_type(auth_type),
-                value: value.trim().to_owned(),
+                value: value.trim().to_string(),
             })
         }
 
@@ -178,7 +178,7 @@ fn parse_input(line: &str) -> Result<OvpnCommand, String> {
                 .ok_or("usage: password <auth-type> <value>")?;
             Ok(OvpnCommand::Password {
                 auth_type: parse_auth_type(auth_type),
-                value: value.trim().to_owned(),
+                value: value.trim().to_string(),
             })
         }
 
@@ -204,7 +204,7 @@ fn parse_input(line: &str) -> Result<OvpnCommand, String> {
                 _ => return Err(format!("invalid needok response: {resp} (use ok/cancel)")),
             };
             Ok(OvpnCommand::NeedOk {
-                name: name.trim().to_owned(),
+                name: name.trim().to_string(),
                 response,
             })
         }
@@ -214,8 +214,8 @@ fn parse_input(line: &str) -> Result<OvpnCommand, String> {
                 .split_once(char::is_whitespace)
                 .ok_or("usage: needstr <name> <value>")?;
             Ok(OvpnCommand::NeedStr {
-                name: name.to_owned(),
-                value: value.trim().to_owned(),
+                name: name.to_string(),
+                value: value.trim().to_string(),
             })
         }
 
@@ -241,7 +241,7 @@ fn parse_input(line: &str) -> Result<OvpnCommand, String> {
                 .parse::<u64>()
                 .map_err(|_| "kid must be a number")?;
             let config_lines = match parts.next() {
-                Some(rest) => rest.split(',').map(|s| s.trim().to_owned()).collect(),
+                Some(rest) => rest.split(',').map(|s| s.trim().to_string()).collect(),
                 None => vec![],
             };
             Ok(OvpnCommand::ClientAuth {
@@ -276,8 +276,8 @@ fn parse_input(line: &str) -> Result<OvpnCommand, String> {
             let reason = parts
                 .next()
                 .ok_or("usage: client-deny <cid> <kid> <reason> [client-reason]")?
-                .to_owned();
-            let client_reason = parts.next().map(|s| s.to_owned());
+                .to_string();
+            let client_reason = parts.next().map(ToOwned::to_owned);
             Ok(OvpnCommand::ClientDeny {
                 cid,
                 kid,
@@ -328,7 +328,7 @@ fn parse_input(line: &str) -> Result<OvpnCommand, String> {
         "quit" => Ok(OvpnCommand::Quit),
 
         // ── Fallback: send as raw command ────────────────────────
-        _ => Ok(OvpnCommand::Raw(line.to_owned())),
+        _ => Ok(OvpnCommand::Raw(line.to_string())),
     }
 }
 
@@ -351,7 +351,7 @@ fn parse_auth_type(s: &str) -> AuthType {
         "PrivateKey" | "Private Key" => AuthType::PrivateKey,
         "HTTPProxy" | "HTTP Proxy" => AuthType::HttpProxy,
         "SOCKSProxy" | "SOCKS Proxy" => AuthType::SocksProxy,
-        other => AuthType::Custom(other.to_owned()),
+        other => AuthType::Custom(other.to_string()),
     }
 }
 
@@ -543,7 +543,7 @@ where
         // Only show the prompt when we're ready for input and still connected.
         if connected {
             eprint!("ovpn> ");
-            std::io::stderr().flush().expect("stderr flush failed");
+            std::io::stderr().flush()?;
         }
 
         tokio::select! {
@@ -563,11 +563,10 @@ where
             }
             // User input from stdin.
             result = lines.next_line() => {
-                let line = match result? {
-                    Some(l) => l,
-                    None => break, // EOF
+                let Some(line) = result? else {
+                    break // EOF
                 };
-                let line = line.trim().to_owned();
+                let line = line.trim().to_string();
                 if line.is_empty() {
                     continue;
                 }
@@ -603,7 +602,7 @@ async fn main() -> anyhow::Result<()> {
             return Ok(());
         }
         Some(a) => a,
-        None => "127.0.0.1:7505".to_owned(),
+        None => "127.0.0.1:7505".to_string(),
     };
 
     // If the address looks like a file path, try connecting as a Unix socket.
