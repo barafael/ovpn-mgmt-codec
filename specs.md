@@ -98,12 +98,19 @@ Commands the spec defines vs. what the codec implements.
 | `CrResponse { response }` | `cr-response {CID} {KID} {RESPONSE}` | `cr-response {base64-response}` | Removed spurious CID/KID fields — this is a client-side command |
 | ~~`ClientDenyV2{..}`~~ | `client-deny-v2 ...` | **Removed** | Command does not exist in OpenVPN; was hallucinated by a prior AI session |
 | `ClientPendingAuth{..}` | `{CID} {KID} {TIMEOUT} {EXTRA}` | `{CID} {KID} {EXTRA} {TIMEOUT}` | Swapped argument order to match `help` output: `CID KID MSG timeout` |
-
-### Unverifiable
-
-| Codec variant | What the codec does | What the spec says | Severity |
-|---------------|--------------------|--------------------|----------|
-| **`BypassMessage(s)`** | `bypass-message "message"` | Not in 2.6.9 help output. May be Windows-service-only or removed. Unverifiable. | **LOW** — uncertain provenance, may be dead code |
+| ~~`BypassMessage(s)`~~ | `bypass-message "message"` | **Removed** | Absent from manage.c dispatch table — hallucinated command |
+| ~~`ClientPf{..}`~~ | `client-pf {CID}` + lines + `END` | **Removed** | manage.h: `/* #define MF_CLIENT_PF *REMOVED FEATURE* */` |
+| `KillTarget::Address` | `kill {ip}:{port}` | `kill {proto}:{ip}:{port}` | manage.c parses 3 colon-separated fields; added `protocol` field |
+| `Notification::State` | `local_port` at pos 5, `remote_port` at pos 7 | `remote_port` at pos 5 (f), `local_port` at pos 7 (h) | Field names were swapped; added `local_addr` (g) and `local_ipv6` (i) |
+| `HoldQuery` | `ResponseKind::SingleValue` | `SUCCESS: hold=N` | manage.c outputs SUCCESS:-prefixed response |
+| bare `State` | `ResponseKind::SingleValue` | END-terminated multi-line | manage.c calls `man_history()` which outputs `END` |
+| `OpenVpnState` | 11 variants | 12 variants | Added `AUTH_PENDING` (manage.h `OPENVPN_STATE_AUTH_PENDING = 12`) |
+| CRV1 parsing | In `Need 'Auth' username/password CRV1:...` | In `Verification Failed: 'Auth' ['CRV1:...']` | management-notes.txt: CRV1 data is in Verification Failed line |
+| SC echo flag | `echo_str == "1"` | `flag & 1 != 0` (multi-bit integer) | manage.c: `SC:%d` with bit 0=ECHO, bit 1=FORMAT |
+| `ClientKill` | `client-kill {CID}` only | `client-kill {CID} [M]` | help output: optional message param (def=RESTART) |
+| `Notification::Proxy` | `{proto_num, proto_type, host, port}` | `{index, proxy_type, host}` | init.c: `>PROXY:%u,%s,%s` — 3 fields, no port |
+| `Pkcs11IdGet` | `ResponseKind::SingleValue` + Phase 4 | `>PKCS11ID-ENTRY:` has `>` prefix | Moved to notification dispatcher (Phase 3) |
+| `ResponseKind::SingleValue` | 3 producers | 0 producers | Removed variant entirely |
 
 ### Missing from codec (spec-defined commands not implemented)
 
