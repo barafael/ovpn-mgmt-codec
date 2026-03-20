@@ -3206,3 +3206,286 @@ fn pkcs11_id_count_zero() {
         other => panic!("unexpected: {other:?}"),
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Decoder graceful degradation on malformed notifications
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Every `parse_*` function returns `Option<Notification>`.  When the
+// wire payload is truncated, garbled, or from a future OpenVPN version,
+// the decoder must fall back to `Notification::Simple` — never panic,
+// never return `Err`.
+
+#[test]
+fn malformed_notification_no_colon_produces_unrecognized() {
+    // A `>` line with no colon at all is truly malformed.
+    let msgs = decode_all(">GARBAGE\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(
+        matches!(&msgs[0], OvpnMessage::Unrecognized { .. }),
+        "expected Unrecognized for >GARBAGE, got: {:?}",
+        msgs[0]
+    );
+}
+
+#[test]
+fn malformed_state_falls_back_to_simple() {
+    // >STATE: with a non-numeric timestamp
+    let msgs = decode_all(">STATE:not-a-timestamp,CONNECTED,ok,10.0.0.1,1.2.3.4\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Simple { kind, .. }) => {
+            assert_eq!(kind, "STATE");
+        }
+        other => panic!("expected Simple fallback, got: {other:?}"),
+    }
+}
+
+#[test]
+fn malformed_state_too_few_fields_falls_back_to_simple() {
+    // >STATE: with only two fields (needs at least 5)
+    let msgs = decode_all(">STATE:1234,CONNECTED\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Simple { kind, .. }) => {
+            assert_eq!(kind, "STATE");
+        }
+        other => panic!("expected Simple fallback, got: {other:?}"),
+    }
+}
+
+#[test]
+fn malformed_bytecount_falls_back_to_simple() {
+    // No comma separator
+    let msgs = decode_all(">BYTECOUNT:not_a_number\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Simple { kind, .. }) => {
+            assert_eq!(kind, "BYTECOUNT");
+        }
+        other => panic!("expected Simple fallback, got: {other:?}"),
+    }
+}
+
+#[test]
+fn malformed_bytecount_cli_falls_back_to_simple() {
+    // Only two fields instead of three
+    let msgs = decode_all(">BYTECOUNT_CLI:1,100\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Simple { kind, .. }) => {
+            assert_eq!(kind, "BYTECOUNT_CLI");
+        }
+        other => panic!("expected Simple fallback, got: {other:?}"),
+    }
+}
+
+#[test]
+fn malformed_log_falls_back_to_simple() {
+    // No comma at all — can't split timestamp from rest
+    let msgs = decode_all(">LOG:no-commas-here\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Simple { kind, .. }) => {
+            assert_eq!(kind, "LOG");
+        }
+        other => panic!("expected Simple fallback, got: {other:?}"),
+    }
+}
+
+#[test]
+fn malformed_echo_falls_back_to_simple() {
+    let msgs = decode_all(">ECHO:no-comma\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Simple { kind, .. }) => {
+            assert_eq!(kind, "ECHO");
+        }
+        other => panic!("expected Simple fallback, got: {other:?}"),
+    }
+}
+
+#[test]
+fn malformed_pkcs11id_count_falls_back_to_simple() {
+    let msgs = decode_all(">PKCS11ID-COUNT:abc\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Simple { kind, .. }) => {
+            assert_eq!(kind, "PKCS11ID-COUNT");
+        }
+        other => panic!("expected Simple fallback, got: {other:?}"),
+    }
+}
+
+#[test]
+fn malformed_need_ok_falls_back_to_simple() {
+    // Missing the "Need '" prefix
+    let msgs = decode_all(">NEED-OK:Something unexpected\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Simple { kind, .. }) => {
+            assert_eq!(kind, "NEED-OK");
+        }
+        other => panic!("expected Simple fallback, got: {other:?}"),
+    }
+}
+
+#[test]
+fn malformed_need_str_falls_back_to_simple() {
+    let msgs = decode_all(">NEED-STR:Bad format no quotes\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Simple { kind, .. }) => {
+            assert_eq!(kind, "NEED-STR");
+        }
+        other => panic!("expected Simple fallback, got: {other:?}"),
+    }
+}
+
+#[test]
+fn malformed_remote_falls_back_to_simple() {
+    // Non-numeric port
+    let msgs = decode_all(">REMOTE:host.example.com,notaport,udp\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Simple { kind, .. }) => {
+            assert_eq!(kind, "REMOTE");
+        }
+        other => panic!("expected Simple fallback, got: {other:?}"),
+    }
+}
+
+#[test]
+fn malformed_proxy_falls_back_to_simple() {
+    // Only one field — not enough
+    let msgs = decode_all(">PROXY:1\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Simple { kind, .. }) => {
+            assert_eq!(kind, "PROXY");
+        }
+        other => panic!("expected Simple fallback, got: {other:?}"),
+    }
+}
+
+#[test]
+fn malformed_password_verification_falls_back_to_simple() {
+    // Verification Failed but missing closing quote
+    let msgs = decode_all(">PASSWORD:Verification Failed: 'Auth\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Simple { kind, .. }) => {
+            assert_eq!(kind, "PASSWORD");
+        }
+        other => panic!("expected Simple fallback, got: {other:?}"),
+    }
+}
+
+#[test]
+fn unrecognized_password_subformat_falls_back_to_simple() {
+    // Neither "Verification Failed", "Need ... username/password", nor "Need ... password"
+    let cases = [
+        // Missing "Need '" prefix entirely
+        ">PASSWORD:Something completely different\n",
+        // Valid "Need 'Type'" prefix, but the rest is neither
+        // "username/password" nor "password" — exercises the final None
+        // fallback at the end of parse_password.
+        ">PASSWORD:Need 'Auth' credentials\n",
+    ];
+    for input in &cases {
+        let msgs = decode_all(input);
+        assert_eq!(msgs.len(), 1, "failed for: {input}");
+        match &msgs[0] {
+            OvpnMessage::Notification(Notification::Simple { kind, .. }) => {
+                assert_eq!(kind, "PASSWORD");
+            }
+            other => panic!("expected Simple fallback for {input}, got: {other:?}"),
+        }
+    }
+}
+
+// ── CLIENT notification edge cases ──────────────────────────────────
+
+#[test]
+fn client_notification_no_comma_in_payload() {
+    // >CLIENT:CONNECT with no comma after the event name — no CID.
+    // The decoder should still handle this gracefully.
+    let msgs = decode_all(">CLIENT:CONNECT\n>CLIENT:ENV,END\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Client { event, cid, .. }) => {
+            assert_eq!(*event, ClientEvent::Connect);
+            assert_eq!(*cid, 0, "missing CID should default to 0");
+        }
+        other => panic!("expected Client notification, got: {other:?}"),
+    }
+}
+
+#[test]
+fn client_notification_interleaved_in_multiline_response() {
+    // A >CLIENT: notification arrives while the codec is accumulating a
+    // multi-line `status` response. The CLIENT block should be emitted
+    // as a separate message, and the status response should complete
+    // intact.
+    let mut codec = OvpnCodec::new();
+    let mut enc_buf = BytesMut::new();
+    codec
+        .encode(OvpnCommand::Status(StatusFormat::V1), &mut enc_buf)
+        .unwrap();
+
+    let mut buf = BytesMut::from(
+        "TITLE,OpenVPN Statistics\n\
+         >CLIENT:CONNECT,0,1\n\
+         >CLIENT:ENV,untrusted_ip=10.0.0.1\n\
+         >CLIENT:ENV,END\n\
+         TIME,2024-01-01 00:00:00\n\
+         END\n",
+    );
+
+    let mut msgs = Vec::new();
+    while let Some(msg) = codec.decode(&mut buf).unwrap() {
+        msgs.push(msg);
+    }
+
+    assert_eq!(
+        msgs.len(),
+        2,
+        "expected CLIENT notification + MultiLine response"
+    );
+    assert!(
+        matches!(
+            &msgs[0],
+            OvpnMessage::Notification(Notification::Client { .. })
+        ),
+        "first message should be Client notification, got: {:?}",
+        msgs[0]
+    );
+    assert!(
+        matches!(&msgs[1], OvpnMessage::MultiLine(_)),
+        "second message should be MultiLine, got: {:?}",
+        msgs[1]
+    );
+    // The multiline response should contain the lines that were NOT part
+    // of the CLIENT block.
+    if let OvpnMessage::MultiLine(lines) = &msgs[1] {
+        assert!(lines.iter().any(|l| l.contains("TITLE")));
+        assert!(lines.iter().any(|l| l.contains("TIME")));
+    }
+}
+
+// ── Encoder: ClientDenyV2 with client_reason but no redirect_url ────
+
+#[test]
+fn encode_client_deny_v2_client_reason_without_redirect_url() {
+    let wire = encode_to_string(OvpnCommand::ClientDenyV2 {
+        cid: 7,
+        kid: 1,
+        reason: "expired".into(),
+        client_reason: Some("Your cert has expired".into()),
+        redirect_url: None,
+    });
+    assert_eq!(
+        wire,
+        "client-deny-v2 7 1 \"expired\" \"Your cert has expired\"\n"
+    );
+}
