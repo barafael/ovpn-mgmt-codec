@@ -4,12 +4,12 @@
 //! client and is silent on what happens when string values contain
 //! newlines, when multi-line block bodies contain a bare `END` line, or
 //! when `AuthType::Custom` carries metacharacters.  These tests assert
-//! the **safe** behavior a codec library should enforce — rejecting or
-//! escaping inputs that would cause command injection on the wire.
+//! the **safe** behavior the encoder enforces — stripping or escaping
+//! inputs that would cause command injection on the wire.
 //!
-//! Every test here is expected to **FAIL** against the current
-//! implementation.  Each failure proves the vulnerability exists.
-//! Once the encoder is hardened, these tests become the regression suite.
+//! All tests **pass**.  They serve as the regression suite for the
+//! encoder hardening implemented in `quote_and_escape`, `sanitize_line`,
+//! and `write_block`.
 //!
 //! [spec]: https://openvpn.net/community-docs/management-interface.html
 
@@ -274,8 +274,8 @@ fn client_pending_auth_extra_newline_must_not_inject_command() {
     let wire = encode(OvpnCommand::ClientPendingAuth {
         cid: 0,
         kid: 0,
-        timeout: 30,
         extra: "data\nexit".into(),
+        timeout: 30,
     });
 
     let line_count = wire.lines().count();

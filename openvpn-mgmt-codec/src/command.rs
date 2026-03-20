@@ -254,10 +254,10 @@ pub enum OvpnCommand {
         cid: u64,
         /// Key ID.
         kid: u64,
-        /// Timeout in seconds before the pending auth expires.
-        timeout: u32,
         /// Extra opaque string passed to the auth backend.
         extra: String,
+        /// Timeout in seconds before the pending auth expires.
+        timeout: u32,
     },
 
     /// Respond to a CR_TEXT challenge (client-side, OpenVPN 2.6+).

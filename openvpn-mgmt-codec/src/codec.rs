@@ -337,8 +337,8 @@ impl Encoder<OvpnCommand> for OvpnCodec {
             OvpnCommand::ClientPendingAuth {
                 cid,
                 kid,
-                timeout,
                 ref extra,
+                timeout,
             } => write_line(
                 dst,
                 &format!(

@@ -740,12 +740,12 @@ fn arb_ovpn_command_with(s: BoxedStrategy<String>) -> BoxedStrategy<OvpnCommand>
         s.clone()
             .prop_map(|r| OvpnCommand::CrResponse { response: r })
             .boxed(),
-        (any::<u64>(), any::<u64>(), any::<u32>(), s.clone())
-            .prop_map(|(c, k, t, e)| OvpnCommand::ClientPendingAuth {
+        (any::<u64>(), any::<u64>(), s.clone(), any::<u32>())
+            .prop_map(|(c, k, e, t)| OvpnCommand::ClientPendingAuth {
                 cid: c,
                 kid: k,
-                timeout: t,
                 extra: e,
+                timeout: t,
             })
             .boxed(),
         // ── Complex with Option strings ────────────────────────

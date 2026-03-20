@@ -21,10 +21,10 @@ command fields.  These tests cover the gap.
 
 ## Current status
 
-All tests are expected to **fail** — they assert the safe behavior the
-encoder should enforce but does not yet implement.  Once the encoder is
-hardened (e.g. rejecting or escaping newlines, validating block body
-lines, escaping `AuthType::Custom`), these become the regression suite.
+All tests **pass**.  The encoder strips `\n`, `\r`, and `\0` from both
+quoted (`quote_and_escape`) and unquoted (`sanitize_line`) fields, escapes
+bare `END` lines in multi-line block bodies, and properly quotes
+`AuthType::Custom` values.  These tests serve as the regression suite.
 
 ## Relationship to protocol_test.rs
 

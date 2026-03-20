@@ -1460,8 +1460,8 @@ fn encode_client_pending_auth() {
     let wire = encode_to_string(OvpnCommand::ClientPendingAuth {
         cid: 0,
         kid: 1,
-        timeout: 120,
         extra: "my-auth-session-id".into(),
+        timeout: 120,
     });
     assert_eq!(wire, "client-pending-auth 0 1 my-auth-session-id 120\n");
 }
@@ -2359,8 +2359,8 @@ fn error_client_pending_auth_too_long() {
         OvpnCommand::ClientPendingAuth {
             cid: 0,
             kid: 1,
-            timeout: 300,
             extra: "x".repeat(2048),
+            timeout: 300,
         },
         "ERROR: client-pending-auth command failed. Extra parameter might be too long\n",
     );
@@ -3111,8 +3111,8 @@ fn encode_client_pending_auth_web_auth() {
     let wire = encode_to_string(OvpnCommand::ClientPendingAuth {
         cid: 1,
         kid: 2,
-        timeout: 300,
         extra: "WEB_AUTH::https://auth.example.com/login".into(),
+        timeout: 300,
     });
     assert_eq!(
         wire,
