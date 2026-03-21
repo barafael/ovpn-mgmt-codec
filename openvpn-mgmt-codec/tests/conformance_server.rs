@@ -111,14 +111,13 @@ async fn wait_for_client_connect_with_env(
 /// 6. Query load-stats — nclients >= 1
 /// 7. Observe bytecount notification
 /// 8. Kill the client, observe CLIENT:DISCONNECT
-/// 9. Wait for client to reconnect (auto-retry)
-/// 10. Deny the client, observe CLIENT:DISCONNECT
-/// 11. Wait for client to reconnect again
-/// 12. Defer auth with `client-pending-auth`, verify client visible
-/// 13. Approve with `client-auth-nt` (no config push), observe ESTABLISHED
-/// 14. Kill client, observe CLIENT:DISCONNECT
-/// 15. Send SIGUSR1, observe state transitions
-/// 16. Exit cleanly
+/// 9. Wait for reconnect → defer with `client-pending-auth`
+/// 10. Verify client visible in status during pending window
+/// 11. Approve with `client-auth-nt` (no config push), observe ESTABLISHED
+/// 12. Kill client, observe CLIENT:DISCONNECT
+/// 13. Wait for reconnect → deny client (client exits after AUTH_FAILED)
+/// 14. Send SIGUSR1, observe state transitions
+/// 15. Exit cleanly
 #[tokio::test]
 #[traced_test]
 async fn server_mode_lifecycle() {
@@ -332,53 +331,16 @@ async fn server_mode_lifecycle() {
     assert_eq!(dc_cid, cid);
     eprintln!("=== client killed, waiting for reconnect ===");
 
-    // ── Client reconnects → deny ────────────────────────────────────
-    let (cid2, kid2) = wait_for_client_connect(&mut framed).await;
-    eprintln!("=== CLIENT:CONNECT (reconnect) cid={cid2} kid={kid2} ===");
-
-    framed
-        .send(OvpnCommand::ClientDeny {
-            cid: cid2,
-            kid: kid2,
-            reason: "conformance-test-deny".into(),
-            client_reason: Some("denied by test".into()),
-        })
-        .await
-        .unwrap();
-    let msg = recv_response(&mut framed).await;
-    assert!(
-        matches!(&msg, OvpnMessage::Success(s) if s.contains("client-deny")),
-        "client-deny should succeed, got {msg:?}",
-    );
-
-    let dc_cid2 = timeout(MSG_TIMEOUT, async {
-        loop {
-            let msg = recv(&mut framed).await;
-            if let OvpnMessage::Notification(Notification::Client {
-                event: ClientEvent::Disconnect,
-                cid: dc,
-                ..
-            }) = &msg
-            {
-                return *dc;
-            }
-        }
-    })
-    .await
-    .expect("timed out waiting for CLIENT:DISCONNECT after deny");
-    assert_eq!(dc_cid2, cid2);
-    eprintln!("=== client denied ===");
-
     // ── Client reconnects → pending-auth → approve with auth-nt ─────
-    let (cid3, kid3) = wait_for_client_connect(&mut framed).await;
-    eprintln!("=== CLIENT:CONNECT (reconnect for pending-auth) cid={cid3} kid={kid3} ===");
+    let (cid2, kid2) = wait_for_client_connect(&mut framed).await;
+    eprintln!("=== CLIENT:CONNECT (reconnect for pending-auth) cid={cid2} kid={kid2} ===");
 
     // Defer the auth decision — tells OpenVPN to hold the client for
     // up to 30 seconds while we "think about it".
     framed
         .send(OvpnCommand::ClientPendingAuth {
-            cid: cid3,
-            kid: kid3,
+            cid: cid2,
+            kid: kid2,
             extra: "conformance-test-pending".into(),
             timeout: 30,
         })
@@ -409,8 +371,8 @@ async fn server_mode_lifecycle() {
     // Now approve with client-auth-nt (no config push).
     framed
         .send(OvpnCommand::ClientAuthNt {
-            cid: cid3,
-            kid: kid3,
+            cid: cid2,
+            kid: kid2,
         })
         .await
         .unwrap();
@@ -421,7 +383,7 @@ async fn server_mode_lifecycle() {
     );
 
     // Wait for ESTABLISHED.
-    let est_cid3 = timeout(MSG_TIMEOUT, async {
+    let est_cid2 = timeout(MSG_TIMEOUT, async {
         loop {
             let msg = recv(&mut framed).await;
             if let OvpnMessage::Notification(Notification::Client {
@@ -436,19 +398,56 @@ async fn server_mode_lifecycle() {
     })
     .await
     .expect("timed out waiting for CLIENT:ESTABLISHED after pending-auth");
-    assert_eq!(est_cid3, cid3);
+    assert_eq!(est_cid2, cid2);
     eprintln!("=== CLIENT:ESTABLISHED after pending-auth + auth-nt ===");
 
-    // Kill client to clean up before SIGUSR1 test.
+    // Kill client to set up the deny test.
     framed
         .send(OvpnCommand::ClientKill {
-            cid: cid3,
+            cid: cid2,
             message: None,
         })
         .await
         .unwrap();
     let msg = recv_response(&mut framed).await;
     assert!(matches!(&msg, OvpnMessage::Success(_)));
+
+    let dc_cid2 = timeout(MSG_TIMEOUT, async {
+        loop {
+            let msg = recv(&mut framed).await;
+            if let OvpnMessage::Notification(Notification::Client {
+                event: ClientEvent::Disconnect,
+                cid: dc,
+                ..
+            }) = &msg
+            {
+                return *dc;
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for CLIENT:DISCONNECT after pending-auth cycle");
+    assert_eq!(dc_cid2, cid2);
+    eprintln!("=== pending-auth client killed, waiting for reconnect ===");
+
+    // ── Client reconnects → deny (last auth test — client exits) ────
+    let (cid3, kid3) = wait_for_client_connect(&mut framed).await;
+    eprintln!("=== CLIENT:CONNECT (reconnect for deny) cid={cid3} kid={kid3} ===");
+
+    framed
+        .send(OvpnCommand::ClientDeny {
+            cid: cid3,
+            kid: kid3,
+            reason: "conformance-test-deny".into(),
+            client_reason: Some("denied by test".into()),
+        })
+        .await
+        .unwrap();
+    let msg = recv_response(&mut framed).await;
+    assert!(
+        matches!(&msg, OvpnMessage::Success(s) if s.contains("client-deny")),
+        "client-deny should succeed, got {msg:?}",
+    );
 
     let dc_cid3 = timeout(MSG_TIMEOUT, async {
         loop {
@@ -464,9 +463,9 @@ async fn server_mode_lifecycle() {
         }
     })
     .await
-    .expect("timed out waiting for CLIENT:DISCONNECT after pending-auth cycle");
+    .expect("timed out waiting for CLIENT:DISCONNECT after deny");
     assert_eq!(dc_cid3, cid3);
-    eprintln!("=== pending-auth client killed ===");
+    eprintln!("=== client denied (client exits, no more reconnects) ===");
 
     // ── Signal SIGUSR1 → state transitions ──────────────────────────
     framed
