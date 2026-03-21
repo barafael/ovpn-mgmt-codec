@@ -112,6 +112,18 @@ Commands the spec defines vs. what the codec implements.
 | `Pkcs11IdGet`               | `ResponseKind::SingleValue` + Phase 4         | `>PKCS11ID-ENTRY:` has `>` prefix                     | Moved to notification dispatcher (Phase 3)                                |
 | `ResponseKind::SingleValue` | 3 producers                                   | 0 producers                                           | Removed variant entirely                                                  |
 
+### Runtime deviations discovered via conformance testing
+
+These deviations were found by running the conformance test suite against
+OpenVPN 2.6.16 on Alpine Linux. They are **not documented** in
+`management-notes.txt` or any other spec source.
+
+| Deviation | Spec / prior versions | OpenVPN 2.6.16 | Codec fix |
+| --- | --- | --- | --- |
+| Password prompt line ending | Implicitly `\r\n` (line-oriented protocol) | `ENTER PASSWORD:` sent **without any line terminator** (interactive prompt, expects password on same line) | Detect prompt in buffer even without `\n`; skip bare empty lines outside accumulation contexts to absorb trailing `\n` from older versions |
+| Management version header | `Management Interface Version: N` | `Management Version: N` (word "Interface" dropped) | Fuzzy match: any line starting with "management" containing "version", extract trailing number |
+| `management-client-auth` requires `auth-user-pass` | Not documented — certificate auth alone should suffice | TLS handshake fails with `Auth Username/Password was not provided by peer` unless the client sends `auth-user-pass` credentials | Client config must include `auth-user-pass` with credentials; management interface receives them in the `>CLIENT:CONNECT` ENV block |
+
 ### Missing from codec (spec-defined commands not implemented)
 
 | Command              | Wire format                     | Since           | Notes                                                    |
