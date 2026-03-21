@@ -213,8 +213,7 @@ mod tests {
 
     #[test]
     fn classify_passes_through_error() {
-        let result: Result<OvpnMessage, io::Error> =
-            Err(io::Error::new(io::ErrorKind::Other, "fail"));
+        let result: Result<OvpnMessage, io::Error> = Err(io::Error::other("fail"));
         assert!(classify(result).is_err());
     }
 }
