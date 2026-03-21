@@ -80,6 +80,14 @@ are absent from `management-notes.txt` and all other documentation:
   instead of reconnecting. Tests that need the client to reconnect must use
   `client-kill` (which sends `RESTART`) before any `client-deny`.
 
+- **`auth-user-pass` (no file) is required for `management-query-passwords`**:
+  without the `auth-user-pass` directive, the client never attempts
+  username/password authentication at all — the server rejects with
+  "Auth Username/Password was not provided by peer". Adding
+  `auth-user-pass` without a filename tells OpenVPN it needs credentials;
+  `--management-query-passwords` then routes the request to the management
+  interface instead of stdin.
+
 - **`>PROXY:` is not sent for UDP connections**: despite enabling
   `--management-query-proxy`, OpenVPN 2.6.16 does not send `>PROXY:`
   notifications when connecting via UDP. The feature may only apply to
@@ -93,6 +101,7 @@ are absent from `management-notes.txt` and all other documentation:
 - **`openvpn-server`** (port 7506 + 1194/udp) — `mode server`, `management-client-auth`, `management-hold`. Full server with PKI and client auth.
 - **`openvpn-client`** — `auth-user-pass`, auto-reconnect. VPN client connecting to `openvpn-server`.
 - **`openvpn-client-remote`** (port 7507) — `management-query-remote`, `management-query-proxy`, `management-hold`. Client with own management for REMOTE testing.
+- **`openvpn-client-password`** (port 7508) — `management-query-passwords`, `auth-user-pass` (no file), `management-hold`. Client that asks management for credentials via `>PASSWORD:`.
 
 PKI (CA + server cert + client cert) is generated at Docker build time
 using easy-rsa in a multi-stage Dockerfile. Management password
@@ -105,7 +114,8 @@ Unix line endings regardless of host OS.
    the server lifecycle test ends with SIGUSR1 which puts the server back
    in hold mode
 2. **Server-mode lifecycle** (`conformance_server.rs`) — single test, ~2 min
-3. **Basic tests** (`conformance.rs`) — 18 tests with `--test-threads=1`
+3. **Password notification test** (`conformance_password.rs`) — 1 test
+4. **Basic tests** (`conformance.rs`) — 18 tests with `--test-threads=1`
 
 ## Test coverage
 
@@ -175,6 +185,25 @@ which has `--management-query-remote` enabled.
 | 3. >REMOTE: notification | `>REMOTE:openvpn-server,1194,udp` — comma-separated parsing, port=1194, protocol=Udp |
 | 4. Remote(Accept) | `remote ACCEPT` wire encoding → Success |
 | 5. State transitions | RESOLVE → WAIT confirm the client acted on the remote response |
+
+### Password notification test (`conformance_password.rs`) — 1 test
+
+Connects to both `openvpn-server` (port 7506) and `openvpn-client-password`
+(port 7508). The client has `--management-query-passwords` and `auth-user-pass`
+(without a filename), so OpenVPN asks the management interface for credentials
+instead of reading them from a file.
+
+This is the most complex conformance test — it orchestrates three concurrent
+management flows: server hold release, server-side client approval (spawned
+task), and client-side password query (main task).
+
+| Step | What it validates |
+|------|-------------------|
+| 1. Server setup | Connect to port 7506, release hold, spawn auto-approve task for CLIENT:CONNECT |
+| 2. Client setup | Connect to port 7508, enable state notifications, release hold |
+| 3. >PASSWORD: notification | `>PASSWORD:Need 'Auth' username/password` — NeedAuth parsing, AuthType::Auth |
+| 4. Supply credentials | `username "Auth" testuser` + `password "Auth" testpass` wire encoding |
+| 5. State transitions | Client proceeds to connect after credentials supplied |
 
 ## Effort
 
