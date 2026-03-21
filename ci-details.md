@@ -205,6 +205,90 @@ task), and client-side password query (main task).
 | 4. Supply credentials | `username "Auth" testuser` + `password "Auth" testpass` wire encoding |
 | 5. State transitions | Client proceeds to connect after credentials supplied |
 
+## What we learned
+
+### Offline tests encode assumptions, not facts
+
+The two codec bugs found on the first CI run would never have been caught
+by any amount of offline testing. The unit tests, property tests, fixture
+tests, and adversarial roundtrip tests all agreed on the wire format — and
+they were all wrong in the same way. Every fixture used `ENTER PASSWORD:\n`
+because the protocol is line-oriented and every other message ends with
+`\n`. Every version test used `Management Interface Version:` because
+that's what the spec says. The real server disagreed on both.
+
+Conformance testing against a real instance is the only way to validate
+the assumptions that all other tests share.
+
+### The protocol documentation is incomplete
+
+`management-notes.txt` documents the command set and notification format
+but omits behavioral details that are critical for correct implementation:
+
+- Which config combinations are required for each notification type
+  (`auth-user-pass` without a file + `management-query-passwords` for
+  `>PASSWORD:Need 'Auth'`; the absence of either fails silently in
+  different ways)
+- Which notifications are sent for which transport protocols
+  (`>PROXY:` is not sent for UDP despite the flag being set)
+- The ordering constraints between management operations
+  (`hold release` returns `SUCCESS` before initialization completes;
+  `client-deny` kills the client permanently while `client-kill` allows
+  reconnection)
+- Line termination exceptions (`ENTER PASSWORD:` is the only message
+  without `\n`)
+- Silent behavioral changes between versions (`Management Version:`
+  replacing `Management Interface Version:` with no deprecation notice)
+
+Every new test container revealed at least one undocumented interaction.
+The operational details section above represents findings that would be
+expensive for any consumer of this protocol to rediscover independently.
+
+### Multi-party orchestration is the hard part
+
+The basic management tests (connect, send command, check response) were
+straightforward. The real complexity emerged when testing features that
+require multiple actors:
+
+- **Server-mode auth** needs a VPN client container to connect and a
+  management client to approve — two concurrent TCP sessions plus the
+  UDP tunnel
+- **Password notifications** need three concurrent flows: server hold
+  release, server-side client approval (spawned task), and client-side
+  password query (main task)
+- **Test ordering** matters because management state persists: SIGUSR1
+  restarts the server, `client-deny` kills the client permanently, and
+  hold release is a one-time operation
+
+The single-management-connection constraint (OpenVPN accepts one client
+at a time) means tests that modify server state affect all subsequent
+tests. This drove the design toward one large lifecycle test rather than
+many independent tests.
+
+### The codec's stateful decoder is its most critical property
+
+The interleave test — sending 25 rapid status queries while generating
+real tunnel traffic — validates the property that matters most in
+production: multi-line responses arrive intact even when `>BYTECOUNT:`
+and `>STATE:` notifications are interleaved on the wire. This is the
+failure mode that would cause data corruption in a real management
+client, and it can only be tested with real traffic generating real
+notifications at unpredictable times.
+
+### Debugging networked tests requires byte-level visibility
+
+The password prompt bug was diagnosed by adding a `xxd` hex dump in CI:
+
+```text
+00000000: 454e 5445 5220 5041 5353 574f 5244 3a    ENTER PASSWORD:
+```
+
+Without seeing the raw bytes, the symptom ("all tests hang at recv()")
+pointed toward networking issues, Docker port mapping, container health,
+and half a dozen other red herrings. The hex dump immediately showed the
+15 bytes with no terminator. Adding raw byte diagnostics early in the
+debugging process would have saved significant time.
+
 ## Effort
 
 The Docker infrastructure was about half a day. The protocol surprises
