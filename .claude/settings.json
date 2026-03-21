@@ -19,8 +19,7 @@
       "Bash(gh search:*)",
       "Bash(cargo mutants:*)",
       "Bash(cargo clippy:*)",
-      "Bash(cargo fmt:*)",
-      "Bash(gh api:*)"
+      "Bash(cargo fmt:*)"
     ]
   }
 }

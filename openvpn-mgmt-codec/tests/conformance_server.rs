@@ -231,71 +231,76 @@ async fn server_mode_lifecycle() {
     // ── Interleaved notifications under real traffic ─────────────────
     // Exercises the codec's ability to demultiplex >BYTECOUNT:
     // notifications that arrive mid-multi-line-response.
-    let _ping = ChildGuard(
-        Command::new("docker")
-            .args([
-                "compose",
-                "exec",
-                "-T",
-                "openvpn-client",
-                "ping",
-                "-i",
-                "0.2",
-                "-w",
-                "6",
-                "10.8.0.1",
-            ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .expect("failed to start ping in client container"),
-    );
+    let (status_count, bytecount_count, state_count) = {
+        let _ping = ChildGuard(
+            Command::new("docker")
+                .args([
+                    "compose",
+                    "exec",
+                    "-T",
+                    "openvpn-client",
+                    "ping",
+                    "-i",
+                    "0.2",
+                    "-w",
+                    "6",
+                    "10.8.0.1",
+                ])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("failed to start ping in client container"),
+        );
 
-    send_ok(&mut framed, OvpnCommand::ByteCount(1), "").await;
+        send_ok(&mut framed, OvpnCommand::ByteCount(1), "").await;
 
-    let mut status_count = 0u32;
-    let mut bytecount_count = 0u32;
-    let mut state_count = 0u32;
+        let mut status_count = 0u32;
+        let mut bytecount_count = 0u32;
+        let mut state_count = 0u32;
 
-    let interleave_result = timeout(Duration::from_secs(10), async {
-        for _ in 0..25 {
-            framed
-                .send(OvpnCommand::Status(StatusFormat::V2))
-                .await
-                .unwrap();
+        let interleave_result = timeout(Duration::from_secs(10), async {
+            for _ in 0..25 {
+                framed
+                    .send(OvpnCommand::Status(StatusFormat::V2))
+                    .await
+                    .unwrap();
 
-            loop {
-                let msg = recv_raw(&mut framed).await;
-                match &msg {
-                    OvpnMessage::MultiLine(lines) => {
-                        assert!(
-                            lines
-                                .iter()
-                                .any(|l| l.contains("HEADER") || l.contains("CLIENT_LIST")),
-                            "status response should be intact, got {lines:?}",
-                        );
-                        status_count += 1;
-                        break;
+                loop {
+                    let msg = recv_raw(&mut framed).await;
+                    match &msg {
+                        OvpnMessage::MultiLine(lines) => {
+                            assert!(
+                                lines.iter().any(|l| {
+                                    l.contains("HEADER") || l.contains("CLIENT_LIST")
+                                }),
+                                "status response should be intact, got {lines:?}",
+                            );
+                            status_count += 1;
+                            break;
+                        }
+                        OvpnMessage::Notification(Notification::ByteCount { .. })
+                        | OvpnMessage::Notification(Notification::ByteCountCli { .. }) => {
+                            bytecount_count += 1;
+                        }
+                        OvpnMessage::Notification(Notification::State { .. }) => {
+                            state_count += 1;
+                        }
+                        OvpnMessage::Notification(_) => {}
+                        other => panic!("unexpected message during interleave test: {other:?}"),
                     }
-                    OvpnMessage::Notification(Notification::ByteCount { .. })
-                    | OvpnMessage::Notification(Notification::ByteCountCli { .. }) => {
-                        bytecount_count += 1;
-                    }
-                    OvpnMessage::Notification(Notification::State { .. }) => {
-                        state_count += 1;
-                    }
-                    OvpnMessage::Notification(_) => {}
-                    other => panic!("unexpected message during interleave test: {other:?}"),
                 }
+                sleep(Duration::from_millis(200)).await;
             }
-            sleep(Duration::from_millis(200)).await;
-        }
-    })
-    .await;
-    assert!(
-        interleave_result.is_ok(),
-        "interleave test timed out after collecting {status_count} status, {bytecount_count} bytecount",
-    );
+        })
+        .await;
+        assert!(
+            interleave_result.is_ok(),
+            "interleave test timed out after {status_count} status, {bytecount_count} bytecount",
+        );
+
+        (status_count, bytecount_count, state_count)
+    };
+    // _ping dropped here — tunnel traffic stops before client-kill
 
     assert_eq!(
         status_count, 25,
