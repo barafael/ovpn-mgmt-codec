@@ -238,7 +238,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 // Values containing special chars must be quoted+escaped:
                 //   username "Auth" "foo\"bar"
                 let at = quote_and_escape(&auth_type.to_string());
-                let val = quote_and_escape(value);
+                let val = quote_and_escape(value.expose());
                 write_line(dst, &format!("username {at} {val}"));
             }
             OvpnCommand::Password {
@@ -246,7 +246,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 ref value,
             } => {
                 let at = quote_and_escape(&auth_type.to_string());
-                let val = quote_and_escape(value);
+                let val = quote_and_escape(value.expose());
                 write_line(dst, &format!("password {at} {val}"));
             }
             OvpnCommand::AuthRetry(mode) => write_line(dst, &format!("auth-retry {mode}")),
@@ -257,7 +257,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 ref state_id,
                 ref response,
             } => {
-                let value = format!("CRV1::{state_id}::{response}");
+                let value = format!("CRV1::{state_id}::{}", response.expose());
                 let escaped = quote_and_escape(&value);
                 write_line(dst, &format!("password \"Auth\" {escaped}"));
             }
@@ -265,7 +265,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 ref password_b64,
                 ref response_b64,
             } => {
-                let value = format!("SCRV1:{password_b64}:{response_b64}");
+                let value = format!("SCRV1:{}:{}", password_b64.expose(), response_b64.expose());
                 let escaped = quote_and_escape(&value);
                 write_line(dst, &format!("password \"Auth\" {escaped}"));
             }
@@ -351,7 +351,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
             ),
 
             OvpnCommand::CrResponse { ref response } => {
-                write_line(dst, &format!("cr-response {}", sanitize_line(response)))
+                write_line(dst, &format!("cr-response {}", sanitize_line(response.expose())))
             }
 
             // ── External certificate ─────────────────────────────
@@ -385,7 +385,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
             // Bare line, no quoting — the management password protocol
             // does not use the config-file lexer.
             OvpnCommand::ManagementPassword(ref pw) => {
-                write_line(dst, &sanitize_line(pw));
+                write_line(dst, &sanitize_line(pw.expose()));
             }
 
             // ── Lifecycle ────────────────────────────────────────
@@ -1009,7 +1009,7 @@ mod tests {
         // properly escaped on the wire.
         let wire = encode_to_string(OvpnCommand::Password {
             auth_type: AuthType::PrivateKey,
-            value: r#"foo\"bar"#.to_string(),
+            value: r#"foo\"bar"#.into(),
         });
         assert_eq!(wire, "password \"Private Key\" \"foo\\\\\\\"bar\"\n");
     }
@@ -1018,7 +1018,7 @@ mod tests {
     fn encode_password_simple() {
         let wire = encode_to_string(OvpnCommand::Password {
             auth_type: AuthType::Auth,
-            value: "hunter2".to_string(),
+            value: "hunter2".into(),
         });
         assert_eq!(wire, "password \"Auth\" \"hunter2\"\n");
     }

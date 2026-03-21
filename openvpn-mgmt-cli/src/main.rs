@@ -171,7 +171,7 @@ fn parse_input(line: &str) -> Result<OvpnCommand, String> {
                 .ok_or("usage: username <auth-type> <value>")?;
             Ok(OvpnCommand::Username {
                 auth_type: parse_auth_type(auth_type),
-                value: value.trim().to_string(),
+                value: value.trim().into(),
             })
         }
 
@@ -181,7 +181,7 @@ fn parse_input(line: &str) -> Result<OvpnCommand, String> {
                 .ok_or("usage: password <auth-type> <value>")?;
             Ok(OvpnCommand::Password {
                 auth_type: parse_auth_type(auth_type),
-                value: value.trim().to_string(),
+                value: value.trim().into(),
             })
         }
 
@@ -479,6 +479,8 @@ fn print_notification(notif: &Notification) {
                 Some(k) => println!("[CLIENT:{event}] cid={cid} kid={k}"),
                 None => println!("[CLIENT:{event}] cid={cid}"),
             }
+            // Intentionally prints all env values including `password` —
+            // this is a local dev/debug tool, not a production log sink.
             for (k, v) in env {
                 println!("  {k}={v}");
             }
@@ -507,6 +509,9 @@ fn print_notification(notif: &Notification) {
                 ..
             } => {
                 println!("[PASSWORD] Dynamic challenge (state={state_id}): {challenge}");
+            }
+            PasswordNotification::AuthToken { token } => {
+                println!("[PASSWORD] Auth-Token: {token}");
             }
         },
         Notification::NeedOk { name, message } => {

@@ -2,6 +2,7 @@ use crate::auth::{AuthRetryMode, AuthType};
 use crate::kill_target::KillTarget;
 use crate::need_ok::NeedOkResponse;
 use crate::proxy_action::ProxyAction;
+use crate::redacted::Redacted;
 use crate::remote_action::RemoteAction;
 use crate::signal::Signal;
 use crate::status_format::StatusFormat;
@@ -12,7 +13,12 @@ use crate::stream_mode::StreamMode;
 /// The encoder handles all serialization — escaping, quoting, multi-line
 /// block framing — so callers never assemble raw strings. The `Raw` variant
 /// exists as an escape hatch for commands not yet modeled here.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Sensitive fields (passwords, tokens, challenge responses) are wrapped in
+/// [`Redacted`] so they are masked in [`Debug`] and [`Display`](std::fmt::Display)
+/// output. Use [`Redacted::expose`] to access the raw value for wire encoding.
+#[derive(Debug, Clone, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "kebab-case")]
 pub enum OvpnCommand {
     // ── Informational ────────────────────────────────────────────
     /// Request connection status in the given format.
@@ -99,8 +105,8 @@ pub enum OvpnCommand {
     Username {
         /// Which credential set this username belongs to.
         auth_type: AuthType,
-        /// The username value.
-        value: String,
+        /// The username value (redacted in debug output).
+        value: Redacted,
     },
 
     /// Supply a password for the given auth type. The value is escaped
@@ -109,8 +115,8 @@ pub enum OvpnCommand {
     Password {
         /// Which credential set this password belongs to.
         auth_type: AuthType,
-        /// The password value (will be escaped on the wire).
-        value: String,
+        /// The password value (redacted in debug output, escaped on the wire).
+        value: Redacted,
     },
 
     /// Set the auth-retry strategy.
@@ -127,8 +133,8 @@ pub enum OvpnCommand {
     ChallengeResponse {
         /// The opaque state ID from the `>PASSWORD:` CRV1 notification.
         state_id: String,
-        /// The user's response to the challenge.
-        response: String,
+        /// The user's response to the challenge (redacted in debug output).
+        response: Redacted,
     },
 
     /// Respond to a static challenge (SC).
@@ -137,10 +143,10 @@ pub enum OvpnCommand {
     /// The caller must pre-encode password and response as base64 —
     /// this crate does not include a base64 dependency.
     StaticChallengeResponse {
-        /// Base64-encoded password.
-        password_b64: String,
-        /// Base64-encoded challenge response.
-        response_b64: String,
+        /// Base64-encoded password (redacted in debug output).
+        password_b64: Redacted,
+        /// Base64-encoded challenge response (redacted in debug output).
+        response_b64: Redacted,
     },
 
     // ── Interactive prompts (OpenVPN 2.1+) ───────────────────────
@@ -259,8 +265,8 @@ pub enum OvpnCommand {
     /// Respond to a CR_TEXT challenge (client-side, OpenVPN 2.6+).
     /// Wire: `cr-response {base64-response}`
     CrResponse {
-        /// The base64-encoded challenge-response answer.
-        response: String,
+        /// The base64-encoded challenge-response answer (redacted in debug output).
+        response: Redacted,
     },
 
     // ── External certificate (OpenVPN 2.4+) ──────────────────────
@@ -277,7 +283,7 @@ pub enum OvpnCommand {
     /// line (no command prefix, no quoting) in response to
     /// [`crate::OvpnMessage::PasswordPrompt`].
     /// Wire: `{password}\n`
-    ManagementPassword(String),
+    ManagementPassword(Redacted),
 
     // ── Session lifecycle ────────────────────────────────────────
     /// Close the management session. OpenVPN keeps running and resumes
@@ -295,9 +301,9 @@ pub enum OvpnCommand {
     /// Send a raw command string, expecting a multi-line (END-terminated)
     /// response.
     ///
-    /// Like [`Raw`], the string is sanitized (newlines/NUL stripped)
-    /// before sending. Unlike `Raw`, the decoder accumulates the response
-    /// into [`OvpnMessage::MultiLine`].
+    /// Like [`Raw`], the string is passed through the encoder's wire-safety
+    /// gate before sending (see [`crate::EncoderMode`]). Unlike `Raw`, the
+    /// decoder accumulates the response into [`OvpnMessage::MultiLine`].
     RawMultiLine(String),
 }
 
@@ -319,6 +325,7 @@ pub(crate) enum ResponseKind {
 impl OvpnCommand {
     /// Determine what kind of response this command produces, so the
     /// decoder knows how to frame the next incoming bytes.
+    #[allow(clippy::match_same_arms)]
     pub(crate) fn expected_response(&self) -> ResponseKind {
         match self {
             // These always produce multi-line (END-terminated) responses.
@@ -344,5 +351,22 @@ impl OvpnCommand {
             // Everything else (including Raw) produces SUCCESS: or ERROR:.
             _ => ResponseKind::SuccessOrError,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn into_static_str_labels() {
+        let label: &str = (&OvpnCommand::State).into();
+        assert_eq!(label, "state");
+
+        let label: &str = (&OvpnCommand::ForgetPasswords).into();
+        assert_eq!(label, "forget-passwords");
+
+        let label: &str = (&OvpnCommand::ByteCount(5)).into();
+        assert_eq!(label, "byte-count");
     }
 }

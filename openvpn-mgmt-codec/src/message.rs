@@ -1,7 +1,10 @@
+use std::fmt;
+
 use crate::auth::AuthType;
 use crate::client_event::ClientEvent;
 use crate::log_level::LogLevel;
 use crate::openvpn_state::OpenVpnState;
+use crate::redacted::Redacted;
 
 /// Sub-types of `>PASSWORD:` notifications. The password notification
 /// has several distinct forms with completely different structures.
@@ -38,6 +41,18 @@ pub enum PasswordNotification {
         challenge: String,
     },
 
+    /// `>PASSWORD:Auth-Token:{token}`
+    ///
+    /// Pushed by the server when `--auth-token` is active. The client should
+    /// store this token and use it in place of the original password on
+    /// subsequent re-authentications.
+    ///
+    /// Source: OpenVPN `manage.c` — `management_auth_token()`.
+    AuthToken {
+        /// The opaque auth-token string (redacted in debug output).
+        token: Redacted,
+    },
+
     /// Dynamic challenge (CRV1):
     /// `>PASSWORD:Verification Failed: 'Auth' ['CRV1:{flags}:{state_id}:{username_b64}:{challenge}']`
     DynamicChallenge {
@@ -45,15 +60,24 @@ pub enum PasswordNotification {
         flags: String,
         /// Opaque state identifier for the auth backend.
         state_id: String,
-        /// Base64-encoded username.
+        /// Base64-encoded username. Note: visible in [`Debug`] output — callers
+        /// handling PII should avoid logging this variant without filtering.
         username_b64: String,
         /// The challenge text presented to the user.
         challenge: String,
     },
 }
 
+/// ENV key names whose values are masked in [`Debug`] output to prevent
+/// accidental exposure in logs.
+const SENSITIVE_ENV_KEYS: &[&str] = &["password"];
+
 /// A parsed real-time notification from OpenVPN.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// The [`Debug`] implementation masks the values of known sensitive ENV
+/// keys (e.g. `password`) in [`Client`](Notification::Client) notifications,
+/// printing `<redacted>` instead.
+#[derive(Clone, PartialEq, Eq)]
 pub enum Notification {
     /// A multi-line `>CLIENT:` notification (CONNECT, REAUTH, ESTABLISHED,
     /// DISCONNECT). The header and all ENV key=value pairs are accumulated
@@ -219,6 +243,146 @@ pub enum Notification {
         /// Everything after the first colon.
         payload: String,
     },
+}
+
+/// Helper for Debug output: displays env entries, masking sensitive keys.
+struct RedactedEnv<'a>(&'a [(String, String)]);
+
+impl fmt::Debug for RedactedEnv<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list()
+            .entries(self.0.iter().map(|(k, v)| {
+                if SENSITIVE_ENV_KEYS.contains(&k.as_str()) {
+                    (k.as_str(), "<redacted>")
+                } else {
+                    (k.as_str(), v.as_str())
+                }
+            }))
+            .finish()
+    }
+}
+
+impl fmt::Debug for Notification {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Client {
+                event,
+                cid,
+                kid,
+                env,
+            } => f
+                .debug_struct("Client")
+                .field("event", event)
+                .field("cid", cid)
+                .field("kid", kid)
+                .field("env", &RedactedEnv(env))
+                .finish(),
+            Self::ClientAddress { cid, addr, primary } => f
+                .debug_struct("ClientAddress")
+                .field("cid", cid)
+                .field("addr", addr)
+                .field("primary", primary)
+                .finish(),
+            Self::State {
+                timestamp,
+                name,
+                description,
+                local_ip,
+                remote_ip,
+                remote_port,
+                local_addr,
+                local_port,
+                local_ipv6,
+            } => f
+                .debug_struct("State")
+                .field("timestamp", timestamp)
+                .field("name", name)
+                .field("description", description)
+                .field("local_ip", local_ip)
+                .field("remote_ip", remote_ip)
+                .field("remote_port", remote_port)
+                .field("local_addr", local_addr)
+                .field("local_port", local_port)
+                .field("local_ipv6", local_ipv6)
+                .finish(),
+            Self::ByteCount {
+                bytes_in,
+                bytes_out,
+            } => f
+                .debug_struct("ByteCount")
+                .field("bytes_in", bytes_in)
+                .field("bytes_out", bytes_out)
+                .finish(),
+            Self::ByteCountCli {
+                cid,
+                bytes_in,
+                bytes_out,
+            } => f
+                .debug_struct("ByteCountCli")
+                .field("cid", cid)
+                .field("bytes_in", bytes_in)
+                .field("bytes_out", bytes_out)
+                .finish(),
+            Self::Log {
+                timestamp,
+                level,
+                message,
+            } => f
+                .debug_struct("Log")
+                .field("timestamp", timestamp)
+                .field("level", level)
+                .field("message", message)
+                .finish(),
+            Self::Echo { timestamp, param } => f
+                .debug_struct("Echo")
+                .field("timestamp", timestamp)
+                .field("param", param)
+                .finish(),
+            Self::Hold { text } => f.debug_struct("Hold").field("text", text).finish(),
+            Self::Fatal { message } => f.debug_struct("Fatal").field("message", message).finish(),
+            Self::Pkcs11IdCount { count } => f
+                .debug_struct("Pkcs11IdCount")
+                .field("count", count)
+                .finish(),
+            Self::NeedOk { name, message } => f
+                .debug_struct("NeedOk")
+                .field("name", name)
+                .field("message", message)
+                .finish(),
+            Self::NeedStr { name, message } => f
+                .debug_struct("NeedStr")
+                .field("name", name)
+                .field("message", message)
+                .finish(),
+            Self::RsaSign { data } => f.debug_struct("RsaSign").field("data", data).finish(),
+            Self::Remote {
+                host,
+                port,
+                protocol,
+            } => f
+                .debug_struct("Remote")
+                .field("host", host)
+                .field("port", port)
+                .field("protocol", protocol)
+                .finish(),
+            Self::Proxy {
+                index,
+                proxy_type,
+                host,
+            } => f
+                .debug_struct("Proxy")
+                .field("index", index)
+                .field("proxy_type", proxy_type)
+                .field("host", host)
+                .finish(),
+            Self::Password(p) => f.debug_tuple("Password").field(p).finish(),
+            Self::Simple { kind, payload } => f
+                .debug_struct("Simple")
+                .field("kind", kind)
+                .field("payload", payload)
+                .finish(),
+        }
+    }
 }
 
 /// A fully decoded message from the OpenVPN management interface.

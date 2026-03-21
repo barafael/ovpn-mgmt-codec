@@ -22,6 +22,8 @@ pub mod need_ok;
 pub mod openvpn_state;
 /// Proxy configuration for `>PROXY:` responses.
 pub mod proxy_action;
+/// A wrapper type that masks sensitive values in debug/display output.
+pub mod redacted;
 /// Remote-override actions for `>REMOTE:` responses.
 pub mod remote_action;
 /// Daemon signals (HUP, TERM, USR1, USR2).
@@ -45,6 +47,7 @@ pub use message::{Notification, OvpnMessage, PasswordNotification};
 pub use need_ok::NeedOkResponse;
 pub use openvpn_state::OpenVpnState;
 pub use proxy_action::ProxyAction;
+pub use redacted::Redacted;
 pub use remote_action::RemoteAction;
 pub use signal::Signal;
 pub use status_format::StatusFormat;
