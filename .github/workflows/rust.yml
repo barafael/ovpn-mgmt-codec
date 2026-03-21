@@ -17,9 +17,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build
-      run: cargo build --verbose
+      run: cargo build
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test
 
   conformance:
 
@@ -32,9 +32,9 @@ jobs:
     - name: Verify containers are running
       run: docker compose ps
     - name: Run server-mode conformance test
-      run: cargo test -p openvpn-mgmt-codec --features conformance-tests --test conformance_server --verbose
+      run: cargo test -p openvpn-mgmt-codec --features conformance-tests --test conformance_server
     - name: Run basic conformance tests
-      run: cargo test -p openvpn-mgmt-codec --features conformance-tests --test conformance --verbose -- --test-threads=1
+      run: cargo test -p openvpn-mgmt-codec --features conformance-tests --test conformance -- --test-threads=1
     - name: Show container logs on failure
       if: failure()
       run: docker compose logs --tail=100
