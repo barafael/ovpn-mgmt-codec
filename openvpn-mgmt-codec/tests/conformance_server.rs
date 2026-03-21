@@ -23,12 +23,13 @@
 
 #![cfg(feature = "conformance-tests")]
 
+use std::process::Command;
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
 use openvpn_mgmt_codec::*;
 use tokio::net::TcpStream;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 use tokio_util::codec::Framed;
 use tracing_test::traced_test;
 
@@ -160,14 +161,16 @@ async fn wait_for_client_event(
 /// 5. Query status V1/V2/V3 with real client data
 /// 6. Query load-stats — nclients >= 1
 /// 7. Observe bytecount notification
-/// 8. Kill the client, observe CLIENT:DISCONNECT
-/// 9. Wait for reconnect → defer with `client-pending-auth`
-/// 10. Verify client visible in status during pending window
-/// 11. Approve with `client-auth-nt` (no config push), observe ESTABLISHED
-/// 12. Kill client, observe CLIENT:DISCONNECT
-/// 13. Wait for reconnect → deny client (client exits after AUTH_FAILED)
-/// 14. Send SIGUSR1, observe state transitions
-/// 15. Exit cleanly
+/// 8. Interleave: rapid status queries under real tunnel traffic,
+///    verify multi-line responses stay intact despite notifications
+/// 9. Kill the client, observe CLIENT:DISCONNECT
+/// 10. Wait for reconnect → defer with `client-pending-auth`
+/// 11. Verify client visible in status during pending window
+/// 12. Approve with `client-auth-nt` (no config push), observe ESTABLISHED
+/// 13. Kill client, observe CLIENT:DISCONNECT
+/// 14. Wait for reconnect → deny client (client exits after AUTH_FAILED)
+/// 15. Send SIGUSR1, observe state transitions
+/// 16. Exit cleanly
 #[tokio::test]
 #[traced_test]
 async fn server_mode_lifecycle() {
@@ -301,6 +304,76 @@ async fn server_mode_lifecycle() {
     })
     .await
     .expect("expected bytecount notification within 10s");
+
+    // ── Interleaved notifications under real traffic ─────────────────
+    // Generate tunnel traffic while rapidly querying status. This
+    // exercises the codec's ability to demultiplex >BYTECOUNT: and
+    // >STATE: notifications that arrive mid-multi-line-response.
+    let mut ping = Command::new("docker")
+        .args(["compose", "exec", "-T", "openvpn-client", "ping", "-i", "0.2", "-w", "6", "10.8.0.1"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("failed to start ping in client container");
+
+    // Ensure bytecount is at 1s interval for maximum interleaving.
+    send_ok(&mut framed, OvpnCommand::ByteCount(1), "").await;
+
+    let mut status_count = 0u32;
+    let mut bytecount_count = 0u32;
+    let mut state_count = 0u32;
+
+    // Send rapid status queries for ~5 seconds, collecting all messages.
+    let interleave_result = timeout(Duration::from_secs(10), async {
+        for _ in 0..25 {
+            framed
+                .send(OvpnCommand::Status(StatusFormat::V2))
+                .await
+                .unwrap();
+
+            // Drain all available messages until we get the MultiLine response.
+            loop {
+                let msg = recv_raw(&mut framed).await;
+                match &msg {
+                    OvpnMessage::MultiLine(lines) => {
+                        assert!(
+                            lines.iter().any(|l| l.contains("HEADER") || l.contains("CLIENT_LIST")),
+                            "status response should be intact, got {lines:?}",
+                        );
+                        status_count += 1;
+                        break;
+                    }
+                    OvpnMessage::Notification(Notification::ByteCount { .. })
+                    | OvpnMessage::Notification(Notification::ByteCountCli { .. }) => {
+                        bytecount_count += 1;
+                    }
+                    OvpnMessage::Notification(Notification::State { .. }) => {
+                        state_count += 1;
+                    }
+                    OvpnMessage::Notification(_) => {}
+                    other => panic!("unexpected message during interleave test: {other:?}"),
+                }
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await;
+    assert!(
+        interleave_result.is_ok(),
+        "interleave test timed out after collecting {status_count} status, {bytecount_count} bytecount",
+    );
+
+    let _ = ping.kill();
+    let _ = ping.wait();
+
+    assert_eq!(status_count, 25, "should have received all 25 status responses");
+    assert!(
+        bytecount_count > 0,
+        "should have seen bytecount notifications interleaved with status queries",
+    );
+    eprintln!(
+        "=== interleave test: {status_count} status, {bytecount_count} bytecount, {state_count} state ===",
+    );
 
     // ── Kill client → CLIENT:DISCONNECT ─────────────────────────────
     send_ok(
