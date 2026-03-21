@@ -69,7 +69,6 @@ async fn recv(framed: &mut Framed<TcpStream, OvpnCodec>) -> OvpnMessage {
 
 /// Receive the next command response, skipping any interleaved
 /// real-time notifications (`>STATE:`, `>LOG:`, `>BYTECOUNT:`, etc.).
-/// After hold release, OpenVPN may stream notifications at any time.
 async fn recv_response(framed: &mut Framed<TcpStream, OvpnCodec>) -> OvpnMessage {
     loop {
         let msg = recv(framed).await;
@@ -77,6 +76,33 @@ async fn recv_response(framed: &mut Framed<TcpStream, OvpnCodec>) -> OvpnMessage
             continue;
         }
         return msg;
+    }
+}
+
+/// Send a command and assert the response is `Success` containing `expected`.
+async fn send_ok(
+    framed: &mut Framed<TcpStream, OvpnCodec>,
+    cmd: OvpnCommand,
+    expected: &str,
+) {
+    framed.send(cmd).await.unwrap();
+    let msg = recv_response(framed).await;
+    assert!(
+        matches!(&msg, OvpnMessage::Success(s) if s.contains(expected)),
+        "expected Success containing {expected:?}, got {msg:?}",
+    );
+}
+
+/// Send a command and return the MultiLine response.
+async fn send_multiline(
+    framed: &mut Framed<TcpStream, OvpnCodec>,
+    cmd: OvpnCommand,
+) -> Vec<String> {
+    framed.send(cmd).await.unwrap();
+    let msg = recv_response(framed).await;
+    match msg {
+        OvpnMessage::MultiLine(lines) => lines,
+        other => panic!("expected MultiLine, got {other:?}"),
     }
 }
 
@@ -91,14 +117,12 @@ async fn connect_and_auth() -> (Framed<TcpStream, OvpnCodec>, bool) {
         .expect("cannot connect — is `docker compose up -d` running?");
     let mut framed = Framed::new(stream, OvpnCodec::new());
 
-    // First message: password prompt (management pw is configured).
     let msg = recv_response(&mut framed).await;
     assert!(
         matches!(msg, OvpnMessage::PasswordPrompt),
         "expected ENTER PASSWORD prompt, got {msg:?}",
     );
 
-    // Authenticate.
     framed
         .send(OvpnCommand::ManagementPassword(MGMT_PASSWORD.into()))
         .await
@@ -109,7 +133,6 @@ async fn connect_and_auth() -> (Framed<TcpStream, OvpnCodec>, bool) {
         "expected auth success, got {msg:?}",
     );
 
-    // After auth: INFO banner is always sent.
     let msg = recv_response(&mut framed).await;
     assert!(
         matches!(&msg, OvpnMessage::Info(s) if s.contains("Management Interface")),
@@ -117,12 +140,10 @@ async fn connect_and_auth() -> (Framed<TcpStream, OvpnCodec>, bool) {
     );
 
     // HOLD notification is sent only if the hold has not been released
-    // yet. After a previous test releases hold, new management clients
-    // do NOT see >HOLD — so we probe with a short timeout.
+    // yet. Probe with a short timeout — after a previous test releases
+    // hold, new management clients do NOT see >HOLD.
     let in_hold = match timeout(Duration::from_secs(2), framed.next()).await {
         Ok(Some(Ok(OvpnMessage::Notification(Notification::Hold { .. })))) => true,
-        // Timeout or non-hold message: hold was already released.
-        // (A non-hold message here would be a state notification, etc.)
         _ => false,
     };
 
@@ -137,7 +158,6 @@ async fn connect_and_auth() -> (Framed<TcpStream, OvpnCodec>, bool) {
 #[traced_test]
 async fn connect_and_authenticate() {
     let (_framed, _in_hold) = connect_and_auth().await;
-    // If we get here, connection + auth + banner all parsed correctly.
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -149,14 +169,7 @@ async fn connect_and_authenticate() {
 async fn version_returns_multiline_with_management_version() {
     let (mut framed, _) = connect_and_auth().await;
 
-    framed.send(OvpnCommand::Version).await.unwrap();
-    let msg = recv_response(&mut framed).await;
-
-    let lines = match msg {
-        OvpnMessage::MultiLine(lines) => lines,
-        other => panic!("expected MultiLine, got {other:?}"),
-    };
-
+    let lines = send_multiline(&mut framed, OvpnCommand::Version).await;
     let info = parse_version(&lines);
     assert!(
         info.management_version().is_some(),
@@ -173,14 +186,7 @@ async fn version_returns_multiline_with_management_version() {
 async fn help_returns_multiline() {
     let (mut framed, _) = connect_and_auth().await;
 
-    framed.send(OvpnCommand::Help).await.unwrap();
-    let msg = recv_response(&mut framed).await;
-
-    let lines = match msg {
-        OvpnMessage::MultiLine(lines) => lines,
-        other => panic!("expected MultiLine, got {other:?}"),
-    };
-
+    let lines = send_multiline(&mut framed, OvpnCommand::Help).await;
     assert!(lines.len() > 10, "help should list many commands");
     assert!(
         lines.iter().any(|l| l.contains("version")),
@@ -195,7 +201,6 @@ async fn pid_returns_valid_process_id() {
 
     framed.send(OvpnCommand::Pid).await.unwrap();
     let msg = recv_response(&mut framed).await;
-
     let payload = match msg {
         OvpnMessage::Success(s) => s,
         other => panic!("expected Success, got {other:?}"),
@@ -214,15 +219,7 @@ async fn pid_returns_valid_process_id() {
 async fn state_returns_multiline_in_hold() {
     let (mut framed, _) = connect_and_auth().await;
 
-    framed.send(OvpnCommand::State).await.unwrap();
-    let msg = recv_response(&mut framed).await;
-
-    let lines = match msg {
-        OvpnMessage::MultiLine(lines) => lines,
-        other => panic!("expected MultiLine, got {other:?}"),
-    };
-
-    // In hold mode, we should see at least one state line.
+    let lines = send_multiline(&mut framed, OvpnCommand::State).await;
     assert!(!lines.is_empty(), "state should return at least one line");
 }
 
@@ -233,14 +230,12 @@ async fn hold_query_parses_correctly() {
 
     framed.send(OvpnCommand::HoldQuery).await.unwrap();
     let msg = recv_response(&mut framed).await;
-
     let payload = match msg {
         OvpnMessage::Success(s) => s,
         other => panic!("expected Success, got {other:?}"),
     };
 
     let held = parse_hold(&payload).expect("should parse as hold=N");
-    // The value depends on whether a prior test released hold.
     assert_eq!(held, in_hold, "hold query should match observed hold state");
 }
 
@@ -253,16 +248,8 @@ async fn hold_query_parses_correctly() {
 async fn status_v1_returns_multiline() {
     let (mut framed, _) = connect_and_auth().await;
 
-    framed
-        .send(OvpnCommand::Status(StatusFormat::V1))
-        .await
-        .unwrap();
-    let msg = recv_response(&mut framed).await;
-
-    assert!(
-        matches!(&msg, OvpnMessage::MultiLine(lines) if !lines.is_empty()),
-        "status 1 should return a non-empty multiline block, got {msg:?}",
-    );
+    let lines = send_multiline(&mut framed, OvpnCommand::Status(StatusFormat::V1)).await;
+    assert!(!lines.is_empty(), "status 1 should return lines");
 }
 
 #[tokio::test]
@@ -270,16 +257,8 @@ async fn status_v1_returns_multiline() {
 async fn status_v2_returns_multiline() {
     let (mut framed, _) = connect_and_auth().await;
 
-    framed
-        .send(OvpnCommand::Status(StatusFormat::V2))
-        .await
-        .unwrap();
-    let msg = recv_response(&mut framed).await;
-
-    assert!(
-        matches!(&msg, OvpnMessage::MultiLine(lines) if !lines.is_empty()),
-        "status 2 should return a non-empty multiline block, got {msg:?}",
-    );
+    let lines = send_multiline(&mut framed, OvpnCommand::Status(StatusFormat::V2)).await;
+    assert!(!lines.is_empty(), "status 2 should return lines");
 }
 
 #[tokio::test]
@@ -287,16 +266,8 @@ async fn status_v2_returns_multiline() {
 async fn status_v3_returns_multiline() {
     let (mut framed, _) = connect_and_auth().await;
 
-    framed
-        .send(OvpnCommand::Status(StatusFormat::V3))
-        .await
-        .unwrap();
-    let msg = recv_response(&mut framed).await;
-
-    assert!(
-        matches!(&msg, OvpnMessage::MultiLine(lines) if !lines.is_empty()),
-        "status 3 should return a non-empty multiline block, got {msg:?}",
-    );
+    let lines = send_multiline(&mut framed, OvpnCommand::Status(StatusFormat::V3)).await;
+    assert!(!lines.is_empty(), "status 3 should return lines");
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -308,22 +279,8 @@ async fn status_v3_returns_multiline() {
 async fn log_on_off_toggle() {
     let (mut framed, _) = connect_and_auth().await;
 
-    framed.send(OvpnCommand::Log(StreamMode::On)).await.unwrap();
-    let msg = recv_response(&mut framed).await;
-    assert!(
-        matches!(&msg, OvpnMessage::Success(s) if s.contains("ON")),
-        "log on should succeed, got {msg:?}",
-    );
-
-    framed
-        .send(OvpnCommand::Log(StreamMode::Off))
-        .await
-        .unwrap();
-    let msg = recv_response(&mut framed).await;
-    assert!(
-        matches!(&msg, OvpnMessage::Success(s) if s.contains("OFF")),
-        "log off should succeed, got {msg:?}",
-    );
+    send_ok(&mut framed, OvpnCommand::Log(StreamMode::On), "ON").await;
+    send_ok(&mut framed, OvpnCommand::Log(StreamMode::Off), "OFF").await;
 }
 
 #[tokio::test]
@@ -331,25 +288,8 @@ async fn log_on_off_toggle() {
 async fn echo_on_off_toggle() {
     let (mut framed, _) = connect_and_auth().await;
 
-    framed
-        .send(OvpnCommand::Echo(StreamMode::On))
-        .await
-        .unwrap();
-    let msg = recv_response(&mut framed).await;
-    assert!(
-        matches!(&msg, OvpnMessage::Success(s) if s.contains("ON")),
-        "echo on should succeed, got {msg:?}",
-    );
-
-    framed
-        .send(OvpnCommand::Echo(StreamMode::Off))
-        .await
-        .unwrap();
-    let msg = recv_response(&mut framed).await;
-    assert!(
-        matches!(&msg, OvpnMessage::Success(s) if s.contains("OFF")),
-        "echo off should succeed, got {msg:?}",
-    );
+    send_ok(&mut framed, OvpnCommand::Echo(StreamMode::On), "ON").await;
+    send_ok(&mut framed, OvpnCommand::Echo(StreamMode::Off), "OFF").await;
 }
 
 #[tokio::test]
@@ -357,25 +297,8 @@ async fn echo_on_off_toggle() {
 async fn state_stream_on_off_toggle() {
     let (mut framed, _) = connect_and_auth().await;
 
-    framed
-        .send(OvpnCommand::StateStream(StreamMode::On))
-        .await
-        .unwrap();
-    let msg = recv_response(&mut framed).await;
-    assert!(
-        matches!(&msg, OvpnMessage::Success(s) if s.contains("ON")),
-        "state on should succeed, got {msg:?}",
-    );
-
-    framed
-        .send(OvpnCommand::StateStream(StreamMode::Off))
-        .await
-        .unwrap();
-    let msg = recv_response(&mut framed).await;
-    assert!(
-        matches!(&msg, OvpnMessage::Success(s) if s.contains("OFF")),
-        "state off should succeed, got {msg:?}",
-    );
+    send_ok(&mut framed, OvpnCommand::StateStream(StreamMode::On), "ON").await;
+    send_ok(&mut framed, OvpnCommand::StateStream(StreamMode::Off), "OFF").await;
 }
 
 #[tokio::test]
@@ -383,21 +306,8 @@ async fn state_stream_on_off_toggle() {
 async fn bytecount_toggle() {
     let (mut framed, _) = connect_and_auth().await;
 
-    // Enable with 5-second interval.
-    framed.send(OvpnCommand::ByteCount(5)).await.unwrap();
-    let msg = recv_response(&mut framed).await;
-    assert!(
-        matches!(&msg, OvpnMessage::Success(_)),
-        "bytecount 5 should succeed, got {msg:?}",
-    );
-
-    // Disable.
-    framed.send(OvpnCommand::ByteCount(0)).await.unwrap();
-    let msg = recv_response(&mut framed).await;
-    assert!(
-        matches!(&msg, OvpnMessage::Success(_)),
-        "bytecount 0 should succeed, got {msg:?}",
-    );
+    send_ok(&mut framed, OvpnCommand::ByteCount(5), "").await;
+    send_ok(&mut framed, OvpnCommand::ByteCount(0), "").await;
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -409,39 +319,19 @@ async fn bytecount_toggle() {
 async fn hold_release_triggers_state_notification() {
     let (mut framed, in_hold) = connect_and_auth().await;
 
-    // Enable state notifications so we can see any transitions.
-    framed
-        .send(OvpnCommand::StateStream(StreamMode::On))
-        .await
-        .unwrap();
-    let msg = recv_response(&mut framed).await;
-    assert!(matches!(msg, OvpnMessage::Success(_)));
+    send_ok(&mut framed, OvpnCommand::StateStream(StreamMode::On), "").await;
 
     if in_hold {
-        // Release hold — this is the first test to do so.
-        framed.send(OvpnCommand::HoldRelease).await.unwrap();
-        let msg = recv_response(&mut framed).await;
-        assert!(
-            matches!(&msg, OvpnMessage::Success(s) if s.contains("hold release")),
-            "hold release should succeed, got {msg:?}",
-        );
+        send_ok(&mut framed, OvpnCommand::HoldRelease, "hold release").await;
 
-        // After releasing hold, OpenVPN starts initializing. We should
-        // see at least one >STATE: notification.
         let msg = recv(&mut framed).await;
         assert!(
             matches!(&msg, OvpnMessage::Notification(Notification::State { .. })),
             "expected state notification after hold release, got {msg:?}",
         );
     } else {
-        // Hold was already released by an earlier test run. Just verify
-        // we can query state history — the codec still works correctly.
-        framed
-            .send(OvpnCommand::StateStream(StreamMode::Off))
-            .await
-            .unwrap();
-        let msg = recv_response(&mut framed).await;
-        assert!(matches!(msg, OvpnMessage::Success(_)));
+        // Hold was already released by an earlier test run.
+        send_ok(&mut framed, OvpnCommand::StateStream(StreamMode::Off), "").await;
     }
 }
 
@@ -454,17 +344,8 @@ async fn hold_release_triggers_state_notification() {
 async fn log_all_returns_multiline_history() {
     let (mut framed, _) = connect_and_auth().await;
 
-    framed
-        .send(OvpnCommand::Log(StreamMode::All))
-        .await
-        .unwrap();
-    let msg = recv_response(&mut framed).await;
-
-    // "log all" returns historical log lines as a multiline block.
-    assert!(
-        matches!(&msg, OvpnMessage::MultiLine(lines) if !lines.is_empty()),
-        "log all should return log history, got {msg:?}",
-    );
+    let lines = send_multiline(&mut framed, OvpnCommand::Log(StreamMode::All)).await;
+    assert!(!lines.is_empty(), "log all should return log history");
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -529,7 +410,6 @@ async fn exit_closes_connection() {
 
     framed.send(OvpnCommand::Exit).await.unwrap();
 
-    // After exit, the server closes the socket. The stream should end.
     let result = timeout(MSG_TIMEOUT, framed.next())
         .await
         .expect("timed out waiting for stream to close");
