@@ -123,6 +123,9 @@ fn arb_password_notification() -> BoxedStrategy<PasswordNotification> {
                 }
             },
         ),
+        safe_text().prop_map(|token| PasswordNotification::AuthToken {
+            token: Redacted::new(token)
+        }),
     ]
     .boxed()
 }
@@ -213,6 +216,9 @@ fn notification_to_wire(notif: &Notification) -> String {
                 ">PASSWORD:Verification Failed: 'Auth' \
                  ['CRV1:{flags}:{state_id}:{username_b64}:{challenge}']\n"
             ),
+            PasswordNotification::AuthToken { token } => {
+                format!(">PASSWORD:Auth-Token:{}\n", token.expose())
+            }
         },
         Notification::Client {
             event,
@@ -710,25 +716,25 @@ fn arb_ovpn_command_with(s: BoxedStrategy<String>) -> BoxedStrategy<OvpnCommand>
         (arb_auth_type(), s.clone())
             .prop_map(|(at, v)| OvpnCommand::Username {
                 auth_type: at,
-                value: v,
+                value: Redacted::new(v),
             })
             .boxed(),
         (arb_auth_type(), s.clone())
             .prop_map(|(at, v)| OvpnCommand::Password {
                 auth_type: at,
-                value: v,
+                value: Redacted::new(v),
             })
             .boxed(),
         (s.clone(), s.clone())
             .prop_map(|(si, r)| OvpnCommand::ChallengeResponse {
                 state_id: si,
-                response: r,
+                response: Redacted::new(r),
             })
             .boxed(),
         (s.clone(), s.clone())
             .prop_map(|(p, r)| OvpnCommand::StaticChallengeResponse {
-                password_b64: p,
-                response_b64: r,
+                password_b64: Redacted::new(p),
+                response_b64: Redacted::new(r),
             })
             .boxed(),
         (s.clone(), arb_need_ok_response())
@@ -740,10 +746,12 @@ fn arb_ovpn_command_with(s: BoxedStrategy<String>) -> BoxedStrategy<OvpnCommand>
         (s.clone(), s.clone())
             .prop_map(|(n, v)| OvpnCommand::NeedStr { name: n, value: v })
             .boxed(),
-        s.clone().prop_map(OvpnCommand::ManagementPassword).boxed(),
+        s.clone()
+            .prop_map(|s| OvpnCommand::ManagementPassword(Redacted::new(s)))
+            .boxed(),
         s.clone().prop_map(OvpnCommand::Raw).boxed(),
         s.clone()
-            .prop_map(|r| OvpnCommand::CrResponse { response: r })
+            .prop_map(|r| OvpnCommand::CrResponse { response: Redacted::new(r) })
             .boxed(),
         (any::<u64>(), any::<u64>(), s.clone(), any::<u32>())
             .prop_map(|(c, k, e, t)| OvpnCommand::ClientPendingAuth {

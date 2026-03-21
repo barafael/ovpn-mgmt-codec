@@ -2127,9 +2127,12 @@ fn client_cr_response_event() {
             kid,
             env,
         }) => {
-            assert_eq!(*event, ClientEvent::Custom("CR_RESPONSE".into()));
-            // CR_RESPONSE header: "1,2,SGFsbG8gV2VsdCE=" — the parser uses
-            // splitn(3) so CID=1, KID=2, and the base64 tail is ignored.
+            assert_eq!(
+                *event,
+                ClientEvent::CrResponse("SGFsbG8gV2VsdCE=".to_string())
+            );
+            // CR_RESPONSE header: "1,2,SGFsbG8gV2VsdCE=" — CID=1, KID=2,
+            // and the base64 response is captured in the CrResponse variant.
             assert_eq!(*cid, 1);
             assert_eq!(*kid, Some(2));
             assert_eq!(env.len(), 3);

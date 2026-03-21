@@ -3,13 +3,11 @@
 //! The [protocol spec][spec] was designed for a trusted, local management
 //! client and is silent on what happens when string values contain
 //! newlines, when multi-line block bodies contain a bare `END` line, or
-//! when `AuthType::Custom` carries metacharacters.  These tests assert
-//! the **safe** behavior the encoder enforces — stripping or escaping
-//! inputs that would cause command injection on the wire.
+//! when `AuthType::Custom` carries metacharacters.
 //!
-//! All tests **pass**.  They serve as the regression suite for the
-//! encoder hardening implemented in `quote_and_escape`, `sanitize_line`,
-//! and `write_block`.
+//! These tests cover both encoder modes:
+//! - **Sanitize** (default): asserts safe stripping/escaping behavior.
+//! - **Strict**: asserts that the encoder rejects unsafe inputs with errors.
 //!
 //! [spec]: https://openvpn.net/community-docs/management-interface.html
 
@@ -21,12 +19,20 @@ use tokio_util::codec::{Decoder, Encoder};
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-/// Encode a command and return the raw wire bytes as a String.
+/// Encode a command in the default (Sanitize) mode and return the wire bytes.
 fn encode(cmd: OvpnCommand) -> String {
     let mut codec = OvpnCodec::new();
     let mut buf = BytesMut::new();
     codec.encode(cmd, &mut buf).unwrap();
     String::from_utf8(buf.to_vec()).unwrap()
+}
+
+/// Try to encode a command in Strict mode.
+fn try_encode_strict(cmd: OvpnCommand) -> Result<String, std::io::Error> {
+    let mut codec = OvpnCodec::new().with_encoder_mode(EncoderMode::Strict);
+    let mut buf = BytesMut::new();
+    codec.encode(cmd, &mut buf)?;
+    Ok(String::from_utf8(buf.to_vec()).unwrap())
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -653,6 +659,67 @@ fn block_body_null_byte_must_be_stripped() {
 }
 
 // ═════════════════════════════════════════════════════════════════════
+// 7b. Bare carriage-return (\r) injection
+// ═════════════════════════════════════════════════════════════════════
+//
+// A bare \r (without \n) can cause display corruption on terminals
+// that interpret CR as "move cursor to column 0", overwriting the
+// visible command prefix.  It can also confuse line-based parsers
+// that treat \r as a line separator.  The encoder must strip bare
+// \r, just like \n and \0.
+
+#[test]
+fn password_bare_cr_must_be_stripped() {
+    let wire = encode(OvpnCommand::Password {
+        auth_type: AuthType::Auth,
+        value: "hunter2\rsignal SIGTERM".into(),
+    });
+
+    assert!(
+        !wire.contains('\r'),
+        "password with bare \\r passed through to wire\nwire: {wire:?}"
+    );
+    // The value should be concatenated without the \r.
+    assert!(
+        wire.contains("hunter2signal SIGTERM"),
+        "bare \\r was not stripped from password value\nwire: {wire:?}"
+    );
+}
+
+#[test]
+fn kill_common_name_bare_cr_must_be_stripped() {
+    let wire = encode(OvpnCommand::Kill(KillTarget::CommonName(
+        "victim\rsignal SIGTERM".into(),
+    )));
+
+    assert!(
+        !wire.contains('\r'),
+        "kill CN with bare \\r passed through to wire\nwire: {wire:?}"
+    );
+}
+
+#[test]
+fn strict_password_bare_cr_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::Password {
+            auth_type: AuthType::Auth,
+            value: "hunter2\rsignal SIGTERM".into(),
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_kill_common_name_bare_cr_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::Kill(KillTarget::CommonName(
+            "victim\rsignal SIGTERM".into(),
+        )))
+        .is_err()
+    );
+}
+
+// ═════════════════════════════════════════════════════════════════════
 // 8. Raw command newline injection
 // ═════════════════════════════════════════════════════════════════════
 //
@@ -674,4 +741,308 @@ fn raw_newline_must_not_inject_command() {
         "Raw command with embedded newline produced {line_count} wire \
          lines — command injection!\nwire: {wire:?}"
     );
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// 9. EncoderMode::Strict — reject unsafe inputs
+// ═════════════════════════════════════════════════════════════════════
+//
+// In Strict mode, encode() returns Err for the same inputs that
+// Sanitize mode silently strips. These tests mirror the Sanitize-mode
+// tests above to ensure both modes are exercised.
+
+#[test]
+fn strict_password_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::Password {
+            auth_type: AuthType::Auth,
+            value: "hunter2\nsignal SIGTERM".into(),
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_username_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::Username {
+            auth_type: AuthType::Auth,
+            value: "admin\nkill all".into(),
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_client_deny_reason_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::ClientDeny {
+            cid: 1,
+            kid: 0,
+            reason: "banned\nsignal SIGTERM".into(),
+            client_reason: None,
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_client_deny_client_reason_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::ClientDeny {
+            cid: 1,
+            kid: 0,
+            reason: "policy".into(),
+            client_reason: Some("sorry\nexit".into()),
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_needstr_value_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::NeedStr {
+            name: "token".into(),
+            value: "abc\nexit".into(),
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_challenge_response_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::ChallengeResponse {
+            state_id: "state123".into(),
+            response: "resp\nexit".into(),
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_static_challenge_response_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::StaticChallengeResponse {
+            password_b64: "cGFzcw==\nexit".into(),
+            response_b64: "cmVzcA==".into(),
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_kill_common_name_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::Kill(KillTarget::CommonName(
+            "victim\nsignal SIGTERM".into(),
+        )))
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_kill_address_ip_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::Kill(KillTarget::Address {
+            protocol: "tcp".to_string(),
+            ip: "10.0.0.1\nsignal SIGTERM".to_string(),
+            port: 1194,
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_remote_mod_host_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::Remote(RemoteAction::Modify {
+            host: "evil.com\nsignal SIGTERM".into(),
+            port: 1194,
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_proxy_http_host_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::Proxy(ProxyAction::Http {
+            host: "proxy.evil\nsignal SIGTERM".into(),
+            port: 8080,
+            non_cleartext_only: false,
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_proxy_socks_host_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::Proxy(ProxyAction::Socks {
+            host: "proxy.evil\nsignal SIGTERM".into(),
+            port: 1080,
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_needok_name_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::NeedOk {
+            name: "prompt\nexit".into(),
+            response: NeedOkResponse::Ok,
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_needstr_name_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::NeedStr {
+            name: "prompt\nexit".into(),
+            value: "safe".into(),
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_cr_response_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::CrResponse {
+            response: "resp\nexit".into(),
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_client_pending_auth_extra_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::ClientPendingAuth {
+            cid: 0,
+            kid: 0,
+            extra: "data\nexit".into(),
+            timeout: 30,
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_management_password_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::ManagementPassword(
+            "s3cret\nsignal SIGTERM".into(),
+        ))
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_raw_newline_rejected() {
+    assert!(try_encode_strict(OvpnCommand::Raw("status\nkill all".into())).is_err());
+}
+
+#[test]
+fn strict_password_null_byte_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::Password {
+            auth_type: AuthType::Auth,
+            value: "real\0fake".into(),
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_client_auth_end_in_config_lines_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::ClientAuth {
+            cid: 0,
+            kid: 1,
+            config_lines: vec![
+                "push \"route 10.0.0.0 255.0.0.0\"".into(),
+                "END".into(),
+                "signal SIGTERM".into(),
+            ],
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_rsa_sig_end_in_base64_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::RsaSig {
+            base64_lines: vec!["AAAA".into(), "END".into(), "signal SIGTERM".into()],
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_certificate_end_in_pem_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::Certificate {
+            pem_lines: vec![
+                "-----BEGIN CERTIFICATE-----".into(),
+                "END".into(),
+                "signal SIGTERM".into(),
+                "-----END CERTIFICATE-----".into(),
+            ],
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_client_auth_newline_in_config_line_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::ClientAuth {
+            cid: 0,
+            kid: 1,
+            config_lines: vec!["push \"route 10.0.0.0 255.0.0.0\"\nsignal SIGTERM".into()],
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_custom_auth_type_with_newline_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::Password {
+            auth_type: AuthType::Custom("Auth\nsignal SIGTERM".into()),
+            value: "pass".into(),
+        })
+        .is_err()
+    );
+}
+
+// ── Strict mode: clean inputs pass through ───────────────────────
+
+#[test]
+fn strict_clean_password_accepted() {
+    let result = try_encode_strict(OvpnCommand::Password {
+        auth_type: AuthType::Auth,
+        value: "hunter2".into(),
+    });
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), "password \"Auth\" \"hunter2\"\n");
+}
+
+#[test]
+fn strict_clean_client_auth_accepted() {
+    let result = try_encode_strict(OvpnCommand::ClientAuth {
+        cid: 0,
+        kid: 1,
+        config_lines: vec!["push \"route 10.0.0.0 255.0.0.0\"".into()],
+    });
+    assert!(result.is_ok());
+    let wire = result.unwrap();
+    assert_eq!(wire.lines().count(), 3); // header + 1 body + END
 }

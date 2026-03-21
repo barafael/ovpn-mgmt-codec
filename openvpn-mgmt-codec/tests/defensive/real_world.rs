@@ -29,6 +29,13 @@ fn encode(cmd: OvpnCommand) -> String {
     String::from_utf8(buf.to_vec()).unwrap()
 }
 
+fn try_encode_strict(cmd: OvpnCommand) -> Result<String, std::io::Error> {
+    let mut codec = OvpnCodec::new().with_encoder_mode(EncoderMode::Strict);
+    let mut buf = BytesMut::new();
+    codec.encode(cmd, &mut buf)?;
+    Ok(String::from_utf8(buf.to_vec()).unwrap())
+}
+
 // ═════════════════════════════════════════════════════════════════════
 // Variable-length >STATE: fields with trailing empty commas
 // Source: real forum logs, OpenVPN 2.4+
@@ -95,7 +102,8 @@ fn state_only_four_fields_old_openvpn() {
 
 #[test]
 fn state_reconnecting_with_reason() {
-    // Source: https://github.com/mysteriumnetwork/go-openvpn test captures
+    // Source: OpenVPN manage.c state output — the description field carries
+    //         the reconnect reason (e.g. "dco-connect-error", "tls-error").
     let msgs = decode_all(">STATE:1676768323,RECONNECTING,dco-connect-error,,,,,\n");
     assert_eq!(msgs.len(), 1);
     match &msgs[0] {
@@ -513,23 +521,24 @@ fn bytecount_large_u64_values() {
 
 // ═════════════════════════════════════════════════════════════════════
 // PASSWORD notification edge cases
-// Source: https://github.com/NordSecurity/gopenvpn (Auth-Token variant)
-//         https://github.com/OpenVPN/openvpn/blob/master/src/openvpn/manage.c
-//         (Verification Failed format for all auth types)
+// Source: https://github.com/OpenVPN/openvpn/blob/master/src/openvpn/manage.c
+//         management_auth_token() emits >PASSWORD:Auth-Token:{token}
+//         management_up_down() / man_password_verify() emit Verification Failed
 // ═════════════════════════════════════════════════════════════════════
 
 #[test]
-fn password_auth_token_degrades_to_simple() {
-    // Source: https://github.com/NordSecurity/gopenvpn
-    // Auth-Token is not a standard subtype; falls back to Simple.
+fn password_auth_token_parsed() {
+    // Source: manage.c management_auth_token()
+    // Wire: >PASSWORD:Auth-Token:{token}
     let msgs = decode_all(">PASSWORD:Auth-Token:tok_abc123\n");
     assert_eq!(msgs.len(), 1);
     match &msgs[0] {
-        OvpnMessage::Notification(Notification::Simple { kind, payload }) => {
-            assert_eq!(kind, "PASSWORD");
-            assert!(payload.contains("Auth-Token"));
+        OvpnMessage::Notification(Notification::Password(PasswordNotification::AuthToken {
+            token,
+        })) => {
+            assert_eq!(token.expose(), "tok_abc123");
         }
-        other => panic!("expected Simple fallback for Auth-Token, got: {other:?}"),
+        other => panic!("expected AuthToken, got: {other:?}"),
     }
 }
 
@@ -545,4 +554,337 @@ fn password_verification_failed_custom_type() {
         }
         other => panic!("expected VerificationFailed, got: {other:?}"),
     }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// Very long lines — stress test for buffer handling
+// Source: defensive — long-running VPN servers with many clients can
+//         produce STATUS responses with very long lines, and X.509
+//         Distinguished Names can be hundreds of bytes.
+// ═════════════════════════════════════════════════════════════════════
+
+#[test]
+fn decoder_handles_very_long_notification_line() {
+    // 100 KB description field — well beyond typical, but must not
+    // panic, allocate pathologically, or corrupt adjacent messages.
+    let long_desc = "A".repeat(100_000);
+    let wire = format!(
+        ">STATE:1700000000,CONNECTED,{long_desc},10.8.0.1,1.2.3.4,1194,,\n\
+         >BYTECOUNT:100,200\n"
+    );
+    let msgs = decode_all(&wire);
+    assert_eq!(msgs.len(), 2);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::State { description, .. }) => {
+            assert_eq!(description.len(), 100_000);
+        }
+        other => panic!("expected State notification, got: {other:?}"),
+    }
+    // The subsequent message must still decode correctly.
+    assert!(matches!(
+        &msgs[1],
+        OvpnMessage::Notification(Notification::ByteCount { .. })
+    ));
+}
+
+#[test]
+fn encoder_handles_very_long_password() {
+    let long_pass = "p".repeat(100_000);
+    let wire = encode(OvpnCommand::Password {
+        auth_type: AuthType::Auth,
+        value: long_pass.clone().into(),
+    });
+    assert_eq!(wire.lines().count(), 1);
+    assert!(wire.contains(&long_pass));
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// >CLIENT:CR_RESPONSE — challenge-response notification (OpenVPN 2.6+)
+//
+// Wire format (from manage.c `management_notify_client_cr_response`):
+//   >CLIENT:CR_RESPONSE,{CID},{KID},{base64_response}
+//   >CLIENT:ENV,untrusted_ip={ip}
+//   >CLIENT:ENV,untrusted_port={port}
+//   >CLIENT:ENV,common_name={cn}
+//   >CLIENT:ENV,username={user}
+//   >CLIENT:ENV,IV_SSO={caps}
+//   ...
+//   >CLIENT:ENV,END
+//
+// - CID: client ID (unsigned long), assigned sequentially from 0
+// - KID: key ID (unsigned int), the TLS session key index (0, 1, 2…)
+// - base64_response: the client's base64-encoded answer to a
+//   CR_TEXT challenge (e.g. a TOTP code)
+//
+// The header carries the response on the same line as CID/KID,
+// unlike CONNECT/REAUTH/DISCONNECT which have only CID,KID.
+// The codec parser uses splitn(3, ',') so the base64 tail after
+// KID is ignored — it is part of the header, not an ENV var.
+//
+// Introduced in OpenVPN 2.6 alongside:
+//   - Server-side --client-crresponse script hook
+//   - OPENVPN_PLUGIN_CLIENT_CRRESPONSE plugin type
+//   - >INFOMSG:CR_TEXT: notification for challenge delivery
+//
+// Sources:
+//   - https://github.com/OpenVPN/openvpn/blob/master/src/openvpn/manage.c
+//     (management_notify_client_cr_response)
+//   - https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
+//   - https://patchwork.openvpn.net/project/openvpn2/patch/20210518122635.2235658-1-arne@rfc2549.org/
+//     (v3 patch by Arne Schwabe, May 2021)
+//   - https://github.com/jkroepke/openvpn-auth-oauth2
+//     (real-world CR_RESPONSE consumer)
+// ═════════════════════════════════════════════════════════════════════
+
+#[test]
+fn client_cr_response_with_full_env() {
+    // Realistic CR_RESPONSE from a TOTP-enabled OpenVPN 2.6 server.
+    // The base64 payload "MTIzNDU2" decodes to "123456" (a typical
+    // 6-digit TOTP code). The ENV block includes SSO capability
+    // flags and a username from the locked auth context.
+    let input = "\
+        >CLIENT:CR_RESPONSE,42,0,MTIzNDU2\n\
+        >CLIENT:ENV,untrusted_ip=203.0.113.50\n\
+        >CLIENT:ENV,untrusted_port=52841\n\
+        >CLIENT:ENV,common_name=client1.example.com\n\
+        >CLIENT:ENV,username=jdoe\n\
+        >CLIENT:ENV,IV_SSO=webauth,openurl,crtext\n\
+        >CLIENT:ENV,IV_VER=2.6.8\n\
+        >CLIENT:ENV,IV_PLAT=linux\n\
+        >CLIENT:ENV,END\n";
+    let msgs = decode_all(input);
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Client {
+            event,
+            cid,
+            kid,
+            env,
+        }) => {
+            assert_eq!(*event, ClientEvent::CrResponse("MTIzNDU2".to_string()));
+            assert_eq!(*cid, 42);
+            assert_eq!(*kid, Some(0));
+            assert_eq!(env.len(), 7);
+            assert_eq!(env[0], ("untrusted_ip".into(), "203.0.113.50".into()));
+            assert_eq!(env[3], ("username".into(), "jdoe".into()),);
+            assert!(
+                env.iter()
+                    .any(|(k, v)| k == "IV_SSO" && v == "webauth,openurl,crtext"),
+                "expected IV_SSO with crtext capability"
+            );
+        }
+        other => panic!("expected Client CR_RESPONSE notification, got: {other:?}"),
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// STATUS v2/v3 interleaving with notifications
+// Source: inherent to the protocol — OpenVPN emits real-time
+//         notifications at any time, even mid-STATUS response.
+//         The existing status_interleaved.txt covers v1; these
+//         tests verify the same property for v2 and v3 formats.
+// ═════════════════════════════════════════════════════════════════════
+
+#[test]
+fn status_v2_interleaved_with_notification() {
+    let response = "\
+        HEADER,CLIENT_LIST,Common Name,Real Address\n\
+        >BYTECOUNT:99999,88888\n\
+        CLIENT_LIST,client1,203.0.113.10:52841\n\
+        GLOBAL_STATS,Max bcast/mcast queue length,3\n\
+        END\n";
+    let mut codec = OvpnCodec::new();
+    let mut enc = BytesMut::new();
+    codec
+        .encode(OvpnCommand::Status(StatusFormat::V2), &mut enc)
+        .unwrap();
+    let mut buf = BytesMut::from(response);
+    let mut msgs = Vec::new();
+    while let Some(msg) = codec.decode(&mut buf).unwrap() {
+        msgs.push(msg);
+    }
+    assert_eq!(
+        msgs.len(),
+        2,
+        "expected notification + multiline, got {msgs:?}"
+    );
+    // Notification arrives first (interleaved).
+    assert!(matches!(
+        &msgs[0],
+        OvpnMessage::Notification(Notification::ByteCount {
+            bytes_in: 99999,
+            bytes_out: 88888,
+        })
+    ));
+    // Multi-line block is reassembled without the notification line.
+    match &msgs[1] {
+        OvpnMessage::MultiLine(lines) => {
+            assert_eq!(lines.len(), 3);
+            assert!(lines[0].starts_with("HEADER,CLIENT_LIST"));
+            assert!(lines[1].starts_with("CLIENT_LIST,client1"));
+            assert!(lines[2].starts_with("GLOBAL_STATS"));
+        }
+        other => panic!("expected MultiLine, got: {other:?}"),
+    }
+}
+
+#[test]
+fn status_v3_interleaved_with_notification() {
+    let response = "\
+        TITLE\tOpenVPN 2.6.8\n\
+        >STATE:1700000000,CONNECTED,SUCCESS,10.8.0.1,,,,\n\
+        TIME\t2024-03-21 14:30:00\t1711031400\n\
+        GLOBAL_STATS\tMax bcast/mcast queue length\t3\n\
+        END\n";
+    let mut codec = OvpnCodec::new();
+    let mut enc = BytesMut::new();
+    codec
+        .encode(OvpnCommand::Status(StatusFormat::V3), &mut enc)
+        .unwrap();
+    let mut buf = BytesMut::from(response);
+    let mut msgs = Vec::new();
+    while let Some(msg) = codec.decode(&mut buf).unwrap() {
+        msgs.push(msg);
+    }
+    assert_eq!(
+        msgs.len(),
+        2,
+        "expected notification + multiline, got {msgs:?}"
+    );
+    assert!(matches!(
+        &msgs[0],
+        OvpnMessage::Notification(Notification::State { .. })
+    ));
+    match &msgs[1] {
+        OvpnMessage::MultiLine(lines) => {
+            assert_eq!(lines.len(), 3);
+            assert!(lines[0].starts_with("TITLE\t"));
+            assert!(lines[1].starts_with("TIME\t"));
+            assert!(lines[2].starts_with("GLOBAL_STATS\t"));
+        }
+        other => panic!("expected MultiLine, got: {other:?}"),
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// >PKCS11ID-ENTRY with realistic PKCS#11 data
+// Source: OpenVPN management-notes.txt, section on pkcs11-id-get.
+//         Real PKCS#11 tokens use hex-encoded serial numbers as IDs
+//         and DER-encoded certificate blobs in base64.
+// ═════════════════════════════════════════════════════════════════════
+
+#[test]
+fn pkcs11id_entry_with_realistic_token_data() {
+    // Realistic PKCS#11 entry: a hardware token with a hex serial
+    // number and a base64-encoded certificate blob.
+    let msgs = decode_all(
+        ">PKCS11ID-ENTRY:'0', ID:'pkcs11:model=SoftHSM%20v2;\
+         manufacturer=SoftHSM%20project;serial=a1b2c3d4e5f6;\
+         token=My%20Token;id=%01%02%03;object=my-cert;type=cert', \
+         BLOB:'MIICpDCCAYwCCQDU+pQ4pHgSpDANBgkqhkiG9w0BAQsFADAU'\n",
+    );
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Pkcs11IdEntry { index, id, blob } => {
+            assert_eq!(index, "0");
+            assert!(
+                id.starts_with("pkcs11:model=SoftHSM"),
+                "expected PKCS#11 URI, got: {id}"
+            );
+            assert!(id.contains("serial=a1b2c3d4e5f6"));
+            assert!(
+                blob.starts_with("MIICpDCCAYwC"),
+                "expected base64 DER certificate, got: {blob}"
+            );
+        }
+        other => panic!("expected Pkcs11IdEntry, got: {other:?}"),
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// >BYTECOUNT_CLI — per-client byte count in server mode
+// Source: OpenVPN management-notes.txt, bytecount command.
+//         Server mode emits >BYTECOUNT_CLI:{cid},{bytes_in},{bytes_out}
+//         for each client at the configured interval.
+// ═════════════════════════════════════════════════════════════════════
+
+#[test]
+fn bytecount_cli_realistic_server_data() {
+    // Simulate a server reporting per-client byte counts for three
+    // clients, including a freshly connected client (CID 5, zero bytes)
+    // and a long-running client with >2^32 byte counts.
+    let input = "\
+        >BYTECOUNT_CLI:0,52834567,9812345\n\
+        >BYTECOUNT_CLI:3,5368709120,1073741824\n\
+        >BYTECOUNT_CLI:5,0,0\n";
+    let msgs = decode_all(input);
+    assert_eq!(msgs.len(), 3);
+
+    // First client: moderate traffic.
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::ByteCountCli {
+            cid,
+            bytes_in,
+            bytes_out,
+        }) => {
+            assert_eq!(*cid, 0);
+            assert_eq!(*bytes_in, 52_834_567);
+            assert_eq!(*bytes_out, 9_812_345);
+        }
+        other => panic!("expected ByteCountCli, got: {other:?}"),
+    }
+
+    // Second client: >2^32 bytes (5 GB in, 1 GB out).
+    match &msgs[1] {
+        OvpnMessage::Notification(Notification::ByteCountCli {
+            cid,
+            bytes_in,
+            bytes_out,
+        }) => {
+            assert_eq!(*cid, 3);
+            assert_eq!(*bytes_in, 5_368_709_120);
+            assert_eq!(*bytes_out, 1_073_741_824);
+        }
+        other => panic!("expected ByteCountCli, got: {other:?}"),
+    }
+
+    // Third client: freshly connected, zero traffic.
+    match &msgs[2] {
+        OvpnMessage::Notification(Notification::ByteCountCli {
+            cid,
+            bytes_in,
+            bytes_out,
+        }) => {
+            assert_eq!(*cid, 5);
+            assert_eq!(*bytes_in, 0);
+            assert_eq!(*bytes_out, 0);
+        }
+        other => panic!("expected ByteCountCli, got: {other:?}"),
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// EncoderMode::Strict — CRLF in base64 and state_id rejected
+// ═════════════════════════════════════════════════════════════════════
+
+#[test]
+fn strict_static_challenge_response_crlf_in_base64_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::StaticChallengeResponse {
+            password_b64: "dGVzdHBhc3N3\r\nb3Jk".into(),
+            response_b64: "MTIzNDU2\r\n".into(),
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn strict_challenge_response_crlf_in_state_id_rejected() {
+    assert!(
+        try_encode_strict(OvpnCommand::ChallengeResponse {
+            state_id: "abc\r\ndef".into(),
+            response: "myresponse".into(),
+        })
+        .is_err()
+    );
 }
