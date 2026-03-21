@@ -7,7 +7,9 @@
 //! # Prerequisites
 //!
 //! The `openvpn-client-password` Docker container (port 7508) with its own
-//! management interface and `--management-query-passwords`.
+//! management interface and `--management-query-passwords`, plus the
+//! `openvpn-server` container (port 7506) which must have hold released so
+//! the VPN server is accepting connections.
 //!
 //! # Running
 //!
@@ -29,6 +31,7 @@ use tokio::time::timeout;
 use tokio_util::codec::Framed;
 use tracing_test::traced_test;
 
+const SERVER_ADDR: &str = "127.0.0.1:7506";
 const CLIENT_PASSWORD_ADDR: &str = "127.0.0.1:7508";
 const MGMT_PASSWORD: &str = "test-password";
 const MSG_TIMEOUT: Duration = Duration::from_secs(120);
@@ -49,31 +52,37 @@ async fn recv(framed: &mut Framed<TcpStream, OvpnCodec>) -> OvpnMessage {
         .expect("timed out waiting for message")
 }
 
+async fn recv_response(framed: &mut Framed<TcpStream, OvpnCodec>) -> OvpnMessage {
+    loop {
+        let msg = recv(framed).await;
+        match &msg {
+            OvpnMessage::Notification(Notification::State { .. })
+            | OvpnMessage::Notification(Notification::Log { .. })
+            | OvpnMessage::Notification(Notification::ByteCount { .. })
+            | OvpnMessage::Notification(Notification::ByteCountCli { .. }) => continue,
+            _ => return msg,
+        }
+    }
+}
+
 async fn send_ok(
     framed: &mut Framed<TcpStream, OvpnCodec>,
     cmd: OvpnCommand,
     expected: &str,
 ) {
     framed.send(cmd).await.unwrap();
-    loop {
-        let msg = recv(framed).await;
-        match &msg {
-            OvpnMessage::Notification(_) => continue,
-            _ => {
-                assert!(
-                    matches!(&msg, OvpnMessage::Success(s) if s.contains(expected)),
-                    "expected Success containing {expected:?}, got {msg:?}",
-                );
-                return;
-            }
-        }
-    }
+    let msg = recv_response(framed).await;
+    assert!(
+        matches!(&msg, OvpnMessage::Success(s) if s.contains(expected)),
+        "expected Success containing {expected:?}, got {msg:?}",
+    );
 }
 
-async fn connect_client_mgmt() -> Framed<TcpStream, OvpnCodec> {
-    let stream = TcpStream::connect(CLIENT_PASSWORD_ADDR)
+/// Connect to a management interface, authenticate, and consume banner + hold.
+async fn connect_and_auth(addr: &str) -> Framed<TcpStream, OvpnCodec> {
+    let stream = TcpStream::connect(addr)
         .await
-        .expect("cannot connect to client-password:7508 — is `docker compose up -d` running?");
+        .unwrap_or_else(|e| panic!("cannot connect to {addr}: {e}"));
     let mut framed = Framed::new(stream, OvpnCodec::new());
 
     let msg = recv(&mut framed).await;
@@ -103,28 +112,57 @@ async fn connect_client_mgmt() -> Framed<TcpStream, OvpnCodec> {
 
 // ═════════════════════════════════════════════════════════════════════
 
-/// After hold release, a client with `--management-query-passwords` (and
-/// no `auth-user-pass` file) sends `>PASSWORD:Need 'Auth' username/password`
-/// to request credentials from the management interface.
+/// With `--management-query-passwords` and no `auth-user-pass` file,
+/// OpenVPN sends `>PASSWORD:Need 'Auth' username/password` after the
+/// TLS handshake when the server asks for credentials.
 ///
 /// This test:
-/// 1. Connects to the client's management interface, authenticates
-/// 2. Enables state notifications, releases hold
+/// 1. Releases hold on the VPN server (port 7506) so it accepts connections
+/// 2. Connects to the password-client management (port 7508), releases hold
 /// 3. Waits for `>PASSWORD:Need 'Auth' username/password`
 /// 4. Supplies credentials via `username "Auth"` + `password "Auth"`
-/// 5. Verifies the client proceeds (state transitions toward connecting)
+/// 5. Verifies the client proceeds (state transitions)
 #[tokio::test]
 #[traced_test]
 async fn password_need_auth() {
-    let mut framed = connect_client_mgmt().await;
-    eprintln!("=== authenticated to client-password management ===");
+    // The VPN server must be running for the client to reach the auth
+    // phase where it needs credentials. The server may be restarting
+    // after the lifecycle test's SIGUSR1, so retry the connection.
+    let server = timeout(Duration::from_secs(30), async {
+        loop {
+            match TcpStream::connect(SERVER_ADDR).await {
+                Ok(stream) => return stream,
+                Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+            }
+        }
+    })
+    .await
+    .expect("server management not reachable within 30s");
+    let mut server = Framed::new(server, OvpnCodec::new());
 
+    let msg = recv(&mut server).await;
+    assert!(matches!(msg, OvpnMessage::PasswordPrompt), "expected password prompt, got {msg:?}");
+    server
+        .send(OvpnCommand::ManagementPassword(MGMT_PASSWORD.into()))
+        .await
+        .unwrap();
+    let msg = recv(&mut server).await;
+    assert!(matches!(&msg, OvpnMessage::Success(s) if s.contains("password")));
+    let _info = recv(&mut server).await;
+    let _hold = recv(&mut server).await;
+
+    send_ok(&mut server, OvpnCommand::HoldRelease, "hold release").await;
+    eprintln!("=== server hold released ===");
+
+    // Now connect to the password client and release its hold.
+    let mut framed = connect_and_auth(CLIENT_PASSWORD_ADDR).await;
     send_ok(&mut framed, OvpnCommand::StateStream(StreamMode::On), "").await;
     send_ok(&mut framed, OvpnCommand::HoldRelease, "hold release").await;
-    eprintln!("=== hold released, waiting for >PASSWORD: ===");
+    eprintln!("=== client hold released, waiting for >PASSWORD: ===");
 
-    // After hold release, the client tries to connect. Since there's no
-    // auth-user-pass file, it asks the management interface for credentials.
+    // The client connects to the server, TLS handshake completes, and
+    // the server asks for auth credentials. Since there's no auth-user-pass
+    // file, OpenVPN asks the management interface.
     let pw_notification = timeout(MSG_TIMEOUT, async {
         loop {
             let msg = recv_raw(&mut framed).await;
@@ -138,7 +176,10 @@ async fn password_need_auth() {
 
     eprintln!("=== >PASSWORD: {pw_notification:?} ===");
     assert!(
-        matches!(&pw_notification, PasswordNotification::NeedAuth { auth_type } if *auth_type == AuthType::Auth),
+        matches!(
+            &pw_notification,
+            PasswordNotification::NeedAuth { auth_type } if *auth_type == AuthType::Auth
+        ),
         "expected NeedAuth with AuthType::Auth, got {pw_notification:?}",
     );
 
@@ -160,10 +201,10 @@ async fn password_need_auth() {
         .unwrap();
     eprintln!("=== credentials supplied ===");
 
-    // After supplying credentials, the client should proceed to connect.
-    // Watch for state transitions indicating progress. The server might
-    // not approve (management-client-auth with no one connected), but
-    // we should at least see WAIT/AUTH states.
+    // After supplying credentials, the client proceeds with auth.
+    // The server has management-client-auth but nobody is approving
+    // on port 7506, so the connection won't fully complete — but we
+    // should see state transitions showing progress (WAIT, AUTH, etc.).
     let mut states = Vec::new();
     let _ = timeout(Duration::from_secs(15), async {
         loop {
@@ -181,7 +222,8 @@ async fn password_need_auth() {
     );
     eprintln!("=== states after credentials: {states:?} ===");
 
-    // Clean exit.
+    // Clean up both connections.
     framed.send(OvpnCommand::Exit).await.unwrap();
+    server.send(OvpnCommand::Exit).await.unwrap();
     eprintln!("=== password conformance test complete ===");
 }
