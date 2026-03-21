@@ -5,3 +5,9 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 6a0fa32925d688157a3bd67fb1150c38ed99f3e222056b87f04f879701f5ccef # shrinks to index = "", id = "", blob = ""
+cc c8ba9da330e331499c361e53ea1b69f4e3a81bd34cb898fd1edde3ba5f1c9ffe # shrinks to lines = [""]
+cc 67d51b967e7d3582daa41e0046e555f21bd7ee9293720039f5fcd57f22093f7b # shrinks to lines = [""]
+cc e25f9a8bc9fc5abb74c00116aaef97d0e38fc0b364c5b2554fae9ed62c32ab5e # shrinks to lines = [""], notif = State { timestamp: 0, name: Connecting, description: "", local_ip: "", remote_ip: "", remote_port: "", local_addr: "", local_port: "", local_ipv6: "" }, inject_idx = 0
+cc fb724ede391836491cfb52a96b518c7212075a60757762cdbe6c48910fa16d61 # shrinks to lines = [""], notif = State { timestamp: 0, name: Connecting, description: "", local_ip: "", remote_ip: "", remote_port: "", local_addr: "", local_port: "", local_ipv6: "" }, inject_idx = 0
+cc ff4b3da91b5c398410fc01f13c31bf055faad2b917ad808f42d564808c23b972 # shrinks to lines = [""]
+cc 676c0246712d3dc7599af03cd4a49d8a8b93d5b9c9ebc07f90dca667270d4862 # shrinks to lines = [""]

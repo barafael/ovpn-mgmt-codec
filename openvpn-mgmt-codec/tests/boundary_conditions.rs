@@ -1,0 +1,556 @@
+//! Boundary condition tests: accumulation limits, FromStr/Display edge
+//! cases, CRLF line endings, and classify exhaustiveness.
+
+use bytes::BytesMut;
+use openvpn_mgmt_codec::stream::{ManagementEvent, classify};
+use openvpn_mgmt_codec::*;
+use tokio_util::codec::{Decoder, Encoder};
+
+// ── Helpers ──────────────────────────────────────────────────────────
+
+fn decode_all(codec: &mut OvpnCodec, input: &str) -> Vec<OvpnMessage> {
+    let mut buf = BytesMut::from(input);
+    let mut msgs = Vec::new();
+    while let Some(msg) = codec.decode(&mut buf).unwrap() {
+        msgs.push(msg);
+    }
+    msgs
+}
+
+fn try_decode_all(codec: &mut OvpnCodec, input: &str) -> Result<Vec<OvpnMessage>, std::io::Error> {
+    let mut buf = BytesMut::from(input);
+    let mut msgs = Vec::new();
+    loop {
+        match codec.decode(&mut buf)? {
+            Some(msg) => msgs.push(msg),
+            None => return Ok(msgs),
+        }
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// Accumulation limit boundary conditions
+// ═════════════════════════════════════════════════════════════════════
+
+#[test]
+fn multiline_limit_exact_boundary_succeeds() {
+    let mut codec = OvpnCodec::new().with_max_multi_line_lines(AccumulationLimit::Max(3));
+    let mut enc_buf = BytesMut::new();
+    codec
+        .encode(OvpnCommand::Status(StatusFormat::V1), &mut enc_buf)
+        .unwrap();
+
+    // Exactly 3 lines — should succeed
+    let msgs = decode_all(&mut codec, "line1\nline2\nline3\nEND\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(&msgs[0], OvpnMessage::MultiLine(lines) if lines.len() == 3));
+}
+
+#[test]
+fn multiline_limit_one_over_boundary_fails() {
+    let mut codec = OvpnCodec::new().with_max_multi_line_lines(AccumulationLimit::Max(3));
+    let mut enc_buf = BytesMut::new();
+    codec
+        .encode(OvpnCommand::Status(StatusFormat::V1), &mut enc_buf)
+        .unwrap();
+
+    let result = try_decode_all(&mut codec, "line1\nline2\nline3\nline4\nEND\n");
+    assert!(result.is_err());
+}
+
+#[test]
+fn multiline_limit_zero_allows_first_line_but_rejects_second() {
+    // Max(0) means the limit check fires when the buffer already has 0 items
+    // and we try to push another. The first line seeds the buffer (vec![line]),
+    // so it gets in. The second push triggers the limit.
+    let mut codec = OvpnCodec::new().with_max_multi_line_lines(AccumulationLimit::Max(0));
+    let mut enc_buf = BytesMut::new();
+    codec
+        .encode(OvpnCommand::Status(StatusFormat::V1), &mut enc_buf)
+        .unwrap();
+
+    // Single line + END succeeds (first line seeds the buf, END terminates)
+    let msgs = decode_all(&mut codec, "line1\nEND\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(&msgs[0], OvpnMessage::MultiLine(lines) if lines.len() == 1));
+}
+
+#[test]
+fn multiline_limit_one_allows_single_line() {
+    let mut codec = OvpnCodec::new().with_max_multi_line_lines(AccumulationLimit::Max(1));
+    let mut enc_buf = BytesMut::new();
+    codec
+        .encode(OvpnCommand::Status(StatusFormat::V1), &mut enc_buf)
+        .unwrap();
+
+    let msgs = decode_all(&mut codec, "single\nEND\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(&msgs[0], OvpnMessage::MultiLine(lines) if lines.len() == 1));
+}
+
+#[test]
+fn client_env_limit_exact_boundary_succeeds() {
+    let mut codec = OvpnCodec::new().with_max_client_env_entries(AccumulationLimit::Max(2));
+
+    let msgs = decode_all(
+        &mut codec,
+        ">CLIENT:CONNECT,1,0\n\
+         >CLIENT:ENV,key1=val1\n\
+         >CLIENT:ENV,key2=val2\n\
+         >CLIENT:ENV,END\n",
+    );
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(
+        &msgs[0],
+        OvpnMessage::Notification(Notification::Client { env, .. }) if env.len() == 2
+    ));
+}
+
+#[test]
+fn client_env_limit_one_over_boundary_fails() {
+    let mut codec = OvpnCodec::new().with_max_client_env_entries(AccumulationLimit::Max(2));
+
+    let result = try_decode_all(
+        &mut codec,
+        ">CLIENT:CONNECT,1,0\n\
+         >CLIENT:ENV,key1=val1\n\
+         >CLIENT:ENV,key2=val2\n\
+         >CLIENT:ENV,key3=val3\n\
+         >CLIENT:ENV,END\n",
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn client_env_limit_zero_rejects_any_entry() {
+    let mut codec = OvpnCodec::new().with_max_client_env_entries(AccumulationLimit::Max(0));
+
+    let result = try_decode_all(
+        &mut codec,
+        ">CLIENT:CONNECT,1,0\n\
+         >CLIENT:ENV,key=val\n\
+         >CLIENT:ENV,END\n",
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn unlimited_accumulation_handles_large_response() {
+    let mut codec = OvpnCodec::new();
+    let mut enc_buf = BytesMut::new();
+    codec
+        .encode(OvpnCommand::Status(StatusFormat::V1), &mut enc_buf)
+        .unwrap();
+
+    let mut input = String::new();
+    for i in 0..500 {
+        input.push_str(&format!("line {i}\n"));
+    }
+    input.push_str("END\n");
+
+    let msgs = decode_all(&mut codec, &input);
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(&msgs[0], OvpnMessage::MultiLine(lines) if lines.len() == 500));
+}
+
+#[test]
+fn empty_multiline_response() {
+    let mut codec = OvpnCodec::new();
+    let mut enc_buf = BytesMut::new();
+    codec
+        .encode(OvpnCommand::Status(StatusFormat::V1), &mut enc_buf)
+        .unwrap();
+
+    // Immediate END — the first "END" is interpreted as a data line (first
+    // line of multiline). But since expected is MultiLine and the line
+    // equals "END", this produces an empty MultiLine.
+    let msgs = decode_all(&mut codec, "END\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(&msgs[0], OvpnMessage::MultiLine(lines) if lines.is_empty()));
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// FromStr / Display edge cases (valid per spec)
+// ═════════════════════════════════════════════════════════════════════
+
+#[test]
+fn status_format_display_roundtrip_all() {
+    for fmt in [StatusFormat::V1, StatusFormat::V2, StatusFormat::V3] {
+        let s = fmt.to_string();
+        let parsed: StatusFormat = s.parse().unwrap();
+        assert_eq!(parsed, fmt);
+    }
+}
+
+#[test]
+fn stream_mode_display_roundtrip_all() {
+    for mode in [
+        StreamMode::On,
+        StreamMode::Off,
+        StreamMode::All,
+        StreamMode::OnAll,
+        StreamMode::Recent(0),
+        StreamMode::Recent(1),
+        StreamMode::Recent(u32::MAX),
+    ] {
+        let s = mode.to_string();
+        let parsed: StreamMode = s.parse().unwrap();
+        assert_eq!(parsed, mode);
+    }
+}
+
+#[test]
+fn auth_type_display_roundtrip_including_custom() {
+    for at in [
+        AuthType::Auth,
+        AuthType::PrivateKey,
+        AuthType::HttpProxy,
+        AuthType::SocksProxy,
+        AuthType::Custom("MyPlugin".to_string()),
+        AuthType::Custom(String::new()),
+    ] {
+        let s = at.to_string();
+        let parsed: AuthType = s.parse().unwrap();
+        assert_eq!(parsed, at);
+    }
+}
+
+#[test]
+fn auth_retry_mode_display_roundtrip() {
+    for mode in [
+        AuthRetryMode::None,
+        AuthRetryMode::Interact,
+        AuthRetryMode::NoInteract,
+    ] {
+        let s = mode.to_string();
+        let parsed: AuthRetryMode = s.parse().unwrap();
+        assert_eq!(parsed, mode);
+    }
+}
+
+#[test]
+fn signal_display_roundtrip() {
+    for sig in [
+        Signal::SigHup,
+        Signal::SigTerm,
+        Signal::SigUsr1,
+        Signal::SigUsr2,
+    ] {
+        let s = sig.to_string();
+        let parsed: Signal = s.parse().unwrap();
+        assert_eq!(parsed, sig);
+    }
+}
+
+#[test]
+fn stream_mode_recent_zero() {
+    let mode = StreamMode::Recent(0);
+    assert_eq!(mode.to_string(), "0");
+    assert_eq!("0".parse::<StreamMode>().unwrap(), mode);
+}
+
+#[test]
+fn auth_type_custom_empty_string() {
+    let at = AuthType::Custom(String::new());
+    let s = at.to_string();
+    assert_eq!(s, "");
+    let parsed: AuthType = s.parse().unwrap();
+    assert_eq!(parsed, AuthType::Custom(String::new()));
+}
+
+#[test]
+fn ovpn_command_from_str_basic_commands() {
+    assert_eq!(
+        "version".parse::<OvpnCommand>().unwrap(),
+        OvpnCommand::Version
+    );
+    assert_eq!("pid".parse::<OvpnCommand>().unwrap(), OvpnCommand::Pid);
+    assert_eq!("help".parse::<OvpnCommand>().unwrap(), OvpnCommand::Help);
+    assert_eq!("net".parse::<OvpnCommand>().unwrap(), OvpnCommand::Net);
+    assert_eq!("exit".parse::<OvpnCommand>().unwrap(), OvpnCommand::Exit);
+    assert_eq!("quit".parse::<OvpnCommand>().unwrap(), OvpnCommand::Quit);
+}
+
+#[test]
+fn ovpn_command_from_str_status_variants() {
+    assert_eq!(
+        "status".parse::<OvpnCommand>().unwrap(),
+        OvpnCommand::Status(StatusFormat::V1)
+    );
+    assert_eq!(
+        "status 2".parse::<OvpnCommand>().unwrap(),
+        OvpnCommand::Status(StatusFormat::V2)
+    );
+    assert_eq!(
+        "status 3".parse::<OvpnCommand>().unwrap(),
+        OvpnCommand::Status(StatusFormat::V3)
+    );
+}
+
+#[test]
+fn ovpn_command_from_str_state_stream_modes() {
+    assert_eq!(
+        "state on".parse::<OvpnCommand>().unwrap(),
+        OvpnCommand::StateStream(StreamMode::On)
+    );
+    assert_eq!(
+        "state off".parse::<OvpnCommand>().unwrap(),
+        OvpnCommand::StateStream(StreamMode::Off)
+    );
+    assert_eq!(
+        "state on all".parse::<OvpnCommand>().unwrap(),
+        OvpnCommand::StateStream(StreamMode::OnAll)
+    );
+}
+
+#[test]
+fn ovpn_command_from_str_unknown_falls_to_raw() {
+    let cmd = "some-future-command arg1 arg2"
+        .parse::<OvpnCommand>()
+        .unwrap();
+    assert!(matches!(cmd, OvpnCommand::Raw(_)));
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// CRLF line ending handling
+// ═════════════════════════════════════════════════════════════════════
+
+#[test]
+fn crlf_success_response() {
+    let mut codec = OvpnCodec::new();
+    let msgs = decode_all(&mut codec, "SUCCESS: pid=42\r\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(&msgs[0], OvpnMessage::Success(s) if s == "pid=42"));
+}
+
+#[test]
+fn crlf_error_response() {
+    let mut codec = OvpnCodec::new();
+    let msgs = decode_all(&mut codec, "ERROR: command not found\r\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(&msgs[0], OvpnMessage::Error(s) if s == "command not found"));
+}
+
+#[test]
+fn crlf_notification() {
+    let mut codec = OvpnCodec::new();
+    let msgs = decode_all(
+        &mut codec,
+        ">STATE:1711000000,CONNECTED,SUCCESS,10.0.0.2,1.2.3.4,,,,\r\n",
+    );
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(
+        &msgs[0],
+        OvpnMessage::Notification(Notification::State {
+            name: OpenVpnState::Connected,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn crlf_multiline_response() {
+    let mut codec = OvpnCodec::new();
+    let mut enc_buf = BytesMut::new();
+    codec.encode(OvpnCommand::Version, &mut enc_buf).unwrap();
+
+    let msgs = decode_all(&mut codec, "OpenVPN 2.6.9\r\nManagement 5\r\nEND\r\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(&msgs[0], OvpnMessage::MultiLine(lines) if lines.len() == 2));
+}
+
+#[test]
+fn crlf_client_notification() {
+    let mut codec = OvpnCodec::new();
+    let msgs = decode_all(
+        &mut codec,
+        ">CLIENT:CONNECT,1,2\r\n\
+         >CLIENT:ENV,common_name=alice\r\n\
+         >CLIENT:ENV,END\r\n",
+    );
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(
+        &msgs[0],
+        OvpnMessage::Notification(Notification::Client { .. })
+    ));
+}
+
+#[test]
+fn crlf_password_prompt() {
+    let mut codec = OvpnCodec::new();
+    let msgs = decode_all(&mut codec, "ENTER PASSWORD:\r\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(&msgs[0], OvpnMessage::PasswordPrompt));
+}
+
+#[test]
+fn mixed_lf_and_crlf_in_same_stream() {
+    let mut codec = OvpnCodec::new();
+    let msgs = decode_all(
+        &mut codec,
+        ">BYTECOUNT:100,200\n\
+         >BYTECOUNT:300,400\r\n\
+         >STATE:1711000000,CONNECTING,,,,,,\n",
+    );
+    assert_eq!(msgs.len(), 3);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// classify exhaustiveness
+// ═════════════════════════════════════════════════════════════════════
+
+#[test]
+fn classify_success() {
+    let result = classify(Ok(OvpnMessage::Success("ok".to_string())));
+    assert!(matches!(
+        result.unwrap(),
+        ManagementEvent::Response(OvpnMessage::Success(_))
+    ));
+}
+
+#[test]
+fn classify_error() {
+    let result = classify(Ok(OvpnMessage::Error("fail".to_string())));
+    assert!(matches!(
+        result.unwrap(),
+        ManagementEvent::Response(OvpnMessage::Error(_))
+    ));
+}
+
+#[test]
+fn classify_multiline() {
+    let result = classify(Ok(OvpnMessage::MultiLine(vec!["a".to_string()])));
+    assert!(matches!(
+        result.unwrap(),
+        ManagementEvent::Response(OvpnMessage::MultiLine(_))
+    ));
+}
+
+#[test]
+fn classify_info() {
+    let result = classify(Ok(OvpnMessage::Info("banner".to_string())));
+    assert!(matches!(
+        result.unwrap(),
+        ManagementEvent::Response(OvpnMessage::Info(_))
+    ));
+}
+
+#[test]
+fn classify_password_prompt() {
+    let result = classify(Ok(OvpnMessage::PasswordPrompt));
+    assert!(matches!(
+        result.unwrap(),
+        ManagementEvent::Response(OvpnMessage::PasswordPrompt)
+    ));
+}
+
+#[test]
+fn classify_unrecognized() {
+    let result = classify(Ok(OvpnMessage::Unrecognized {
+        line: "garbage".to_string(),
+        kind: UnrecognizedKind::UnexpectedLine,
+    }));
+    assert!(matches!(
+        result.unwrap(),
+        ManagementEvent::Response(OvpnMessage::Unrecognized { .. })
+    ));
+}
+
+#[test]
+fn classify_pkcs11_id_entry() {
+    let result = classify(Ok(OvpnMessage::Pkcs11IdEntry {
+        index: "0".to_string(),
+        id: "id".to_string(),
+        blob: "blob".to_string(),
+    }));
+    assert!(matches!(
+        result.unwrap(),
+        ManagementEvent::Response(OvpnMessage::Pkcs11IdEntry { .. })
+    ));
+}
+
+#[test]
+fn classify_notification_state() {
+    let result = classify(Ok(OvpnMessage::Notification(Notification::State {
+        timestamp: 0,
+        name: OpenVpnState::Connected,
+        description: String::new(),
+        local_ip: String::new(),
+        remote_ip: String::new(),
+        remote_port: String::new(),
+        local_addr: String::new(),
+        local_port: String::new(),
+        local_ipv6: String::new(),
+    })));
+    assert!(matches!(
+        result.unwrap(),
+        ManagementEvent::Notification(Notification::State { .. })
+    ));
+}
+
+#[test]
+fn classify_notification_client() {
+    let result = classify(Ok(OvpnMessage::Notification(Notification::Client {
+        event: ClientEvent::Connect,
+        cid: 1,
+        kid: Some(0),
+        env: vec![],
+    })));
+    assert!(matches!(
+        result.unwrap(),
+        ManagementEvent::Notification(Notification::Client { .. })
+    ));
+}
+
+#[test]
+fn classify_notification_hold() {
+    let result = classify(Ok(OvpnMessage::Notification(Notification::Hold {
+        text: "waiting".to_string(),
+    })));
+    assert!(matches!(
+        result.unwrap(),
+        ManagementEvent::Notification(Notification::Hold { .. })
+    ));
+}
+
+#[test]
+fn classify_notification_fatal() {
+    let result = classify(Ok(OvpnMessage::Notification(Notification::Fatal {
+        message: "crash".to_string(),
+    })));
+    assert!(matches!(
+        result.unwrap(),
+        ManagementEvent::Notification(Notification::Fatal { .. })
+    ));
+}
+
+#[test]
+fn classify_notification_password() {
+    let result = classify(Ok(OvpnMessage::Notification(Notification::Password(
+        PasswordNotification::NeedAuth {
+            auth_type: AuthType::Auth,
+        },
+    ))));
+    assert!(matches!(
+        result.unwrap(),
+        ManagementEvent::Notification(Notification::Password(_))
+    ));
+}
+
+#[test]
+fn classify_notification_simple_fallback() {
+    let result = classify(Ok(OvpnMessage::Notification(Notification::Simple {
+        kind: "FUTURE".to_string(),
+        payload: "data".to_string(),
+    })));
+    assert!(matches!(
+        result.unwrap(),
+        ManagementEvent::Notification(Notification::Simple { .. })
+    ));
+}
+
+#[test]
+fn classify_io_error_passes_through() {
+    let result = classify(Err(std::io::Error::other("boom")));
+    assert!(result.is_err());
+}
