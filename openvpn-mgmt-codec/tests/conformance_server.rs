@@ -78,10 +78,10 @@ async fn wait_for_client_event(
     timeout(MSG_TIMEOUT, async {
         loop {
             let msg = recv_raw(framed).await;
-            if let OvpnMessage::Notification(Notification::Client { event, cid, .. }) = &msg {
-                if *event == expected {
-                    return *cid;
-                }
+            if let OvpnMessage::Notification(Notification::Client { event, cid, .. }) = &msg
+                && *event == expected
+            {
+                return *cid;
             }
         }
     })
@@ -270,9 +270,9 @@ async fn server_mode_lifecycle() {
                     match &msg {
                         OvpnMessage::MultiLine(lines) => {
                             assert!(
-                                lines.iter().any(|l| {
-                                    l.contains("HEADER") || l.contains("CLIENT_LIST")
-                                }),
+                                lines
+                                    .iter()
+                                    .any(|l| { l.contains("HEADER") || l.contains("CLIENT_LIST") }),
                                 "status response should be intact, got {lines:?}",
                             );
                             status_count += 1;

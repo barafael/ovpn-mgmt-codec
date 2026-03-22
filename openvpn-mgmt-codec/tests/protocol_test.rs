@@ -95,7 +95,7 @@ fn full_state_transition_sequence() {
             assert_eq!(description, "SUCCESS");
             assert_eq!(local_ip, "10.8.0.6");
             assert_eq!(remote_ip, "198.51.100.1");
-            assert_eq!(remote_port, "1194");
+            assert_eq!(*remote_port, Some(1194));
         }
         other => panic!("expected STATE notification, got: {other:?}"),
     }
@@ -761,7 +761,7 @@ fn proxy_notification() {
             host,
         }) => {
             assert_eq!(*index, 1);
-            assert_eq!(proxy_type, "udp");
+            assert_eq!(*proxy_type, TransportProtocol::Udp);
             assert_eq!(host, "vpn.example.com");
         }
         other => panic!("unexpected: {other:?}"),
@@ -864,7 +864,7 @@ fn encode_kill_by_common_name() {
 fn encode_kill_by_address() {
     assert_eq!(
         encode_to_string(OvpnCommand::Kill(KillTarget::Address {
-            protocol: "tcp".into(),
+            protocol: TransportProtocol::Tcp,
             ip: "203.0.113.10".into(),
             port: 52841,
         })),
@@ -1812,7 +1812,7 @@ fn help_response_2_6_9_with_newer_commands() {
 fn state_all_known_names() {
     // All state names defined in manage.h's openvpn_state enum
     let states: Vec<(&str, OpenVpnState)> = vec![
-        ("INITIAL", OpenVpnState::Custom("INITIAL".into())),
+        ("INITIAL", OpenVpnState::Unknown("INITIAL".into())),
         ("CONNECTING", OpenVpnState::Connecting),
         ("WAIT", OpenVpnState::Wait),
         ("AUTH", OpenVpnState::Auth),
@@ -1859,7 +1859,7 @@ fn state_connected_with_all_fields_populated() {
             assert_eq!(description, "SUCCESS");
             assert_eq!(local_ip, "10.10.10.1");
             assert_eq!(remote_ip, "1.2.3.4");
-            assert_eq!(remote_port, "1194");
+            assert_eq!(*remote_port, Some(1194));
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -1970,7 +1970,7 @@ fn full_connection_lifecycle_from_capture() {
             assert_eq!(*name, OpenVpnState::Connected);
             assert_eq!(local_ip, "10.10.10.1");
             assert_eq!(remote_ip, "1.2.3.4");
-            assert_eq!(remote_port, "1194");
+            assert_eq!(*remote_port, Some(1194));
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -2060,7 +2060,7 @@ fn password_custom_auth_type() {
         OvpnMessage::Notification(Notification::Password(PasswordNotification::NeedPassword {
             auth_type,
         })) => {
-            assert_eq!(*auth_type, AuthType::Custom("Management".into()));
+            assert_eq!(*auth_type, AuthType::Unknown("Management".into()));
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -2253,7 +2253,7 @@ fn success_load_stats_real_format() {
 fn success_kill_by_address_real_format() {
     let msgs = encode_then_decode(
         OvpnCommand::Kill(KillTarget::Address {
-            protocol: "tcp".into(),
+            protocol: TransportProtocol::Tcp,
             ip: "1.2.3.4".into(),
             port: 4000,
         }),
@@ -2455,7 +2455,7 @@ fn remote_notification_tcp() {
         }) => {
             assert_eq!(host, "vpn.example.com");
             assert_eq!(*port, 443);
-            assert_eq!(*protocol, TransportProtocol::Custom("tcp-client".into()));
+            assert_eq!(*protocol, TransportProtocol::Unknown("tcp-client".into()));
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -2474,7 +2474,7 @@ fn proxy_notification_tcp() {
             host,
         }) => {
             assert_eq!(*index, 1);
-            assert_eq!(proxy_type, "TCP");
+            assert_eq!(*proxy_type, TransportProtocol::Tcp);
             assert_eq!(host, "vpn.example.com");
         }
         other => panic!("unexpected: {other:?}"),

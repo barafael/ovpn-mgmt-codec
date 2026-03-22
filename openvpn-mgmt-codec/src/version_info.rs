@@ -1,5 +1,3 @@
-use std::fmt;
-
 /// Parsed output from the `version` command's multi-line response.
 ///
 /// The response from OpenVPN looks like:
@@ -98,22 +96,6 @@ impl VersionInfo {
     }
 }
 
-impl fmt::Display for VersionInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(line) = &self.openvpn_version_line {
-            write!(f, "{line}")?;
-            if let Some(v) = self.management_version {
-                write!(f, " (management v{v})")?;
-            }
-        } else if let Some(v) = self.management_version {
-            write!(f, "Management Interface Version: {v}")?;
-        } else {
-            f.write_str("(unknown version)")?;
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,23 +147,5 @@ mod tests {
         let lines = vec!["Management Protocol Version: 6".to_string()];
         let info = VersionInfo::parse(&lines);
         assert_eq!(info.management_version(), Some(6));
-    }
-
-    #[test]
-    fn display_typical() {
-        let lines = vec![
-            "OpenVPN Version: OpenVPN 2.6.9".to_string(),
-            "Management Interface Version: 5".to_string(),
-        ];
-        let info = VersionInfo::parse(&lines);
-        let s = info.to_string();
-        assert!(s.contains("2.6.9"));
-        assert!(s.contains("management v5"));
-    }
-
-    #[test]
-    fn display_unknown() {
-        let info = VersionInfo::parse(&[]);
-        assert_eq!(info.to_string(), "(unknown version)");
     }
 }

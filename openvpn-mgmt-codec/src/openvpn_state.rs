@@ -1,7 +1,13 @@
-use std::fmt;
+use std::str::FromStr;
+
+/// Error returned when a string is not a recognized OpenVPN state.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unrecognized OpenVPN state: {0:?}")]
+pub struct ParseOpenVpnStateError(pub String);
 
 /// OpenVPN connection state as reported in `>STATE:` notifications.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, strum::Display)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 pub enum OpenVpnState {
     /// Initial connection in progress.
     Connecting,
@@ -40,46 +46,29 @@ pub enum OpenVpnState {
     AuthPending,
 
     /// An unrecognized state (forward compatibility).
-    Custom(String),
+    #[strum(default)]
+    Unknown(String),
 }
 
-impl OpenVpnState {
-    /// Parse a wire state string into a typed variant.
-    pub(crate) fn parse(s: &str) -> Self {
+impl FromStr for OpenVpnState {
+    type Err = ParseOpenVpnStateError;
+
+    /// Parse a recognized state string.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "CONNECTING" => Self::Connecting,
-            "WAIT" => Self::Wait,
-            "AUTH" => Self::Auth,
-            "GET_CONFIG" => Self::GetConfig,
-            "ASSIGN_IP" => Self::AssignIp,
-            "ADD_ROUTES" => Self::AddRoutes,
-            "CONNECTED" => Self::Connected,
-            "RECONNECTING" => Self::Reconnecting,
-            "EXITING" => Self::Exiting,
-            "TCP_CONNECT" => Self::TcpConnect,
-            "RESOLVE" => Self::Resolve,
-            "AUTH_PENDING" => Self::AuthPending,
-            other => Self::Custom(other.to_string()),
-        }
-    }
-}
-
-impl fmt::Display for OpenVpnState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Connecting => f.write_str("CONNECTING"),
-            Self::Wait => f.write_str("WAIT"),
-            Self::Auth => f.write_str("AUTH"),
-            Self::GetConfig => f.write_str("GET_CONFIG"),
-            Self::AssignIp => f.write_str("ASSIGN_IP"),
-            Self::AddRoutes => f.write_str("ADD_ROUTES"),
-            Self::Connected => f.write_str("CONNECTED"),
-            Self::Reconnecting => f.write_str("RECONNECTING"),
-            Self::Exiting => f.write_str("EXITING"),
-            Self::TcpConnect => f.write_str("TCP_CONNECT"),
-            Self::Resolve => f.write_str("RESOLVE"),
-            Self::AuthPending => f.write_str("AUTH_PENDING"),
-            Self::Custom(s) => f.write_str(s),
+            "CONNECTING" => Ok(Self::Connecting),
+            "WAIT" => Ok(Self::Wait),
+            "AUTH" => Ok(Self::Auth),
+            "GET_CONFIG" => Ok(Self::GetConfig),
+            "ASSIGN_IP" => Ok(Self::AssignIp),
+            "ADD_ROUTES" => Ok(Self::AddRoutes),
+            "CONNECTED" => Ok(Self::Connected),
+            "RECONNECTING" => Ok(Self::Reconnecting),
+            "EXITING" => Ok(Self::Exiting),
+            "TCP_CONNECT" => Ok(Self::TcpConnect),
+            "RESOLVE" => Ok(Self::Resolve),
+            "AUTH_PENDING" => Ok(Self::AuthPending),
+            other => Err(ParseOpenVpnStateError(other.to_string())),
         }
     }
 }

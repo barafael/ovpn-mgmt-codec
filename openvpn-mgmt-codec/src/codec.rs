@@ -37,8 +37,8 @@ pub enum EncoderMode {
 ///
 /// Returned as the inner error of [`std::io::Error`] when [`EncoderMode::Strict`]
 /// is active and the input contains characters that would corrupt the wire protocol.
-/// Callers can recover it via [`std::io::Error::get_ref`] and
-/// [`downcast_ref::<EncodeError>()`](std::error::Error::downcast_ref).
+/// Callers can recover it via
+/// [`get_ref()`](std::io::Error::get_ref) and `downcast_ref::<EncodeError>()`.
 #[derive(Debug, thiserror::Error)]
 pub enum EncodeError {
     /// A field contains `\n`, `\r`, or `\0`.
@@ -139,20 +139,22 @@ pub enum AccumulationLimit {
 /// The OpenVPN management protocol is strictly sequential: each command
 /// produces exactly one response, and the server processes commands one
 /// at a time. This codec tracks which response type to expect from the
-/// last encoded command. **You must fully drain [`decode()`] (until it
+/// last encoded command. **You must fully drain `decode()` (until it
 /// returns `Ok(None)` or the expected response is received) before
-/// calling [`encode()`] again.** Encoding a new command while a
+/// calling `encode()` again.** Encoding a new command while a
 /// multi-line response or CLIENT notification is still being accumulated
 /// will overwrite the tracking state and corrupt decoding.
 ///
 /// In debug builds, `encode()` asserts that no accumulation is in
 /// progress.
+#[derive(better_default::Default)]
 pub struct OvpnCodec {
     /// What kind of response we expect from the last command we encoded.
     /// This resolves the protocol's ambiguity: when we see a line that is
     /// not `SUCCESS:`, `ERROR:`, or a `>` notification, this field tells
     /// us whether to treat it as the start of a multi-line block or as a
     /// standalone value.
+    #[default(ResponseKind::SuccessOrError)]
     expected: ResponseKind,
 
     /// Accumulator for multi-line (END-terminated) command responses.
@@ -163,9 +165,11 @@ pub struct OvpnCodec {
     client_notif: Option<ClientNotifAccum>,
 
     /// Maximum lines to accumulate in a multi-line response.
+    #[default(AccumulationLimit::Unlimited)]
     max_multi_line_lines: AccumulationLimit,
 
     /// Maximum ENV entries to accumulate for a `>CLIENT:` notification.
+    #[default(AccumulationLimit::Unlimited)]
     max_client_env_entries: AccumulationLimit,
 
     /// How the encoder handles unsafe characters in user-supplied strings.
@@ -176,18 +180,7 @@ impl OvpnCodec {
     /// Create a new codec with default state, ready to encode commands and
     /// decode responses.
     pub fn new() -> Self {
-        Self {
-            // Before any command is sent, OpenVPN sends a greeting
-            // (`>INFO:...` notification). SuccessOrError is a safe default
-            // because SUCCESS/ERROR/notifications are all self-describing —
-            // this field only matters for ambiguous (non-prefixed) lines.
-            expected: ResponseKind::SuccessOrError,
-            multi_line_buf: None,
-            client_notif: None,
-            max_multi_line_lines: AccumulationLimit::Unlimited,
-            max_client_env_entries: AccumulationLimit::Unlimited,
-            encoder_mode: EncoderMode::default(),
-        }
+        Self::default()
     }
 
     /// Set the maximum number of lines accumulated in a multi-line
@@ -229,12 +222,6 @@ fn check_accumulation_limit(
         )));
     }
     Ok(())
-}
-
-impl Default for OvpnCodec {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 // ── Encoder ───────────────────────────────────────────────────────
@@ -291,8 +278,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 write_line(
                     dst,
                     &format!(
-                        "kill {}:{}:{port}",
-                        wire_safe(protocol, "kill address protocol", mode)?,
+                        "kill {protocol}:{}:{port}",
                         wire_safe(ip, "kill address ip", mode)?
                     ),
                 );
@@ -826,7 +812,10 @@ impl OvpnCodec {
                 let response = id_parts.next().unwrap_or("").to_string();
                 ClientEvent::CrResponse(response)
             } else {
-                ClientEvent::parse(&event)
+                event
+                    .parse()
+                    .inspect_err(|error| warn!(%error, "unknown client event"))
+                    .unwrap_or_else(|_| ClientEvent::Unknown(event.clone()))
             };
 
             // Start accumulation — don't emit anything yet.
@@ -888,19 +877,36 @@ impl OvpnCodec {
 // across OpenVPN versions and we never want a parse failure to
 // produce an error.
 
+/// Parse a port field that may be empty. Empty or whitespace-only strings
+/// yield `None`; non-empty non-numeric strings also yield `None` (the STATE
+/// notification degrades gracefully via the caller's `?` on other fields).
+fn parse_optional_port(s: &str) -> Option<u16> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    s.parse()
+        .inspect_err(|error| warn!(%error, port = s, "non-numeric port in STATE notification"))
+        .ok()
+}
+
 fn parse_state(payload: &str) -> Option<Notification> {
     // Wire format per management-notes.txt:
     //   (a) timestamp, (b) state, (c) desc, (d) local_ip, (e) remote_ip,
     //   (f) remote_port, (g) local_addr, (h) local_port, (i) local_ipv6
     let mut parts = payload.splitn(9, ',');
     let timestamp = parts.next()?.parse().ok()?;
-    let name = OpenVpnState::parse(parts.next()?);
+    let state_str = parts.next()?;
+    let name = state_str
+        .parse()
+        .inspect_err(|error| warn!(%error, "unknown OpenVPN state"))
+        .unwrap_or_else(|_| OpenVpnState::Unknown(state_str.to_string()));
     let description = parts.next()?.to_string();
     let local_ip = parts.next()?.to_string();
     let remote_ip = parts.next()?.to_string();
-    let remote_port = parts.next().unwrap_or("").to_string();
+    let remote_port = parse_optional_port(parts.next().unwrap_or(""));
     let local_addr = parts.next().unwrap_or("").to_string();
-    let local_port = parts.next().unwrap_or("").to_string();
+    let local_port = parse_optional_port(parts.next().unwrap_or(""));
     let local_ipv6 = parts.next().unwrap_or("").to_string();
     Some(Notification::State {
         timestamp,
@@ -941,7 +947,10 @@ fn parse_log(payload: &str) -> Option<Notification> {
     let (level_str, message) = rest.split_once(',')?;
     Some(Notification::Log {
         timestamp,
-        level: LogLevel::parse(level_str),
+        level: level_str
+            .parse()
+            .inspect_err(|error| warn!(%error, "unknown log level"))
+            .unwrap_or_else(|_| LogLevel::Unknown(level_str.to_string())),
         message: message.to_string(),
     })
 }
@@ -1001,7 +1010,11 @@ fn parse_remote(payload: &str) -> Option<Notification> {
     let mut parts = payload.splitn(3, ',');
     let host = parts.next()?.to_string();
     let port = parts.next()?.parse().ok()?;
-    let protocol = TransportProtocol::parse(parts.next()?);
+    let proto_str = parts.next()?;
+    let protocol = proto_str
+        .parse()
+        .inspect_err(|error| warn!(%error, "unknown transport protocol"))
+        .unwrap_or_else(|_| TransportProtocol::Unknown(proto_str.to_string()));
     Some(Notification::Remote {
         host,
         port,
@@ -1013,7 +1026,11 @@ fn parse_proxy(payload: &str) -> Option<Notification> {
     // Wire: >PROXY:{index},{type},{host}  (3 fields per init.c)
     let mut parts = payload.splitn(3, ',');
     let index = parts.next()?.parse().ok()?;
-    let proxy_type = parts.next()?.to_string();
+    let pt_str = parts.next()?;
+    let proxy_type = pt_str
+        .parse()
+        .inspect_err(|error| warn!(%error, "unknown proxy type"))
+        .unwrap_or_else(|_| TransportProtocol::Unknown(pt_str.to_string()));
     let host = parts.next()?.to_string();
     Some(Notification::Proxy {
         index,
@@ -1028,13 +1045,9 @@ use crate::auth::AuthType;
 
 /// Map a wire auth-type string to the typed enum.
 fn parse_auth_type(s: &str) -> AuthType {
-    match s {
-        "Auth" => AuthType::Auth,
-        "Private Key" => AuthType::PrivateKey,
-        "HTTP Proxy" => AuthType::HttpProxy,
-        "SOCKS Proxy" => AuthType::SocksProxy,
-        other => AuthType::Custom(other.to_string()),
-    }
+    s.parse()
+        .inspect_err(|error| warn!(%error, "unknown auth type"))
+        .unwrap_or_else(|_| AuthType::Unknown(s.to_string()))
 }
 
 fn parse_password(payload: &str) -> Option<Notification> {
@@ -1369,23 +1382,17 @@ mod tests {
     fn decode_state_notification() {
         let msgs = decode_all(">STATE:1234567890,CONNECTED,SUCCESS,,10.0.0.1\n");
         assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
+        assert!(matches!(
+            &msgs[0],
             OvpnMessage::Notification(Notification::State {
-                timestamp,
-                name,
+                timestamp: 1234567890,
+                name: OpenVpnState::Connected,
                 description,
                 local_ip,
                 remote_ip,
                 ..
-            }) => {
-                assert_eq!(*timestamp, 1234567890);
-                assert_eq!(*name, OpenVpnState::Connected);
-                assert_eq!(description, "SUCCESS");
-                assert_eq!(local_ip, "");
-                assert_eq!(remote_ip, "10.0.0.1");
-            }
-            other => panic!("unexpected: {other:?}"),
-        }
+            }) if description == "SUCCESS" && local_ip.is_empty() && remote_ip == "10.0.0.1"
+        ));
     }
 
     #[test]
@@ -1398,14 +1405,13 @@ mod tests {
             "OpenVPN CLIENT LIST\nCommon Name,Real Address\ntest,1.2.3.4:1234\nEND\n",
         );
         assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
-            OvpnMessage::MultiLine(lines) => {
-                assert_eq!(lines.len(), 3);
-                assert_eq!(lines[0], "OpenVPN CLIENT LIST");
-                assert_eq!(lines[2], "test,1.2.3.4:1234");
-            }
-            other => panic!("unexpected: {other:?}"),
-        }
+        assert!(matches!(
+            &msgs[0],
+            OvpnMessage::MultiLine(lines)
+                if lines.len() == 3
+                && lines[0] == "OpenVPN CLIENT LIST"
+                && lines[2] == "test,1.2.3.4:1234"
+        ));
     }
 
     #[test]
@@ -1424,13 +1430,11 @@ mod tests {
             "1234567890,CONNECTED,SUCCESS,,10.0.0.1,,,,\nEND\n",
         );
         assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
-            OvpnMessage::MultiLine(lines) => {
-                assert_eq!(lines.len(), 1);
-                assert!(lines[0].starts_with("1234567890"));
-            }
-            other => panic!("unexpected: {other:?}"),
-        }
+        assert!(matches!(
+            &msgs[0],
+            OvpnMessage::MultiLine(lines)
+                if lines.len() == 1 && lines[0].starts_with("1234567890")
+        ));
     }
 
     #[test]
@@ -1451,12 +1455,10 @@ mod tests {
             })
         ));
         // Second: the completed multi-line block (notification is not included).
-        match &msgs[1] {
-            OvpnMessage::MultiLine(lines) => {
-                assert_eq!(lines, &["header line", "data line"]);
-            }
-            other => panic!("unexpected: {other:?}"),
-        }
+        assert!(matches!(
+            &msgs[1],
+            OvpnMessage::MultiLine(lines) if lines == &["header line", "data line"]
+        ));
     }
 
     #[test]
@@ -1468,39 +1470,31 @@ mod tests {
             >CLIENT:ENV,END\n";
         let msgs = decode_all(input);
         assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
+        assert!(matches!(
+            &msgs[0],
             OvpnMessage::Notification(Notification::Client {
-                event,
-                cid,
-                kid,
+                event: ClientEvent::Connect,
+                cid: 0,
+                kid: Some(1),
                 env,
-            }) => {
-                assert_eq!(*event, ClientEvent::Connect);
-                assert_eq!(*cid, 0);
-                assert_eq!(*kid, Some(1));
-                assert_eq!(env.len(), 2);
-                assert_eq!(env[0], ("untrusted_ip".to_string(), "1.2.3.4".to_string()));
-                assert_eq!(
-                    env[1],
-                    ("common_name".to_string(), "TestClient".to_string())
-                );
-            }
-            other => panic!("unexpected: {other:?}"),
-        }
+            }) if env.len() == 2
+                && env[0] == ("untrusted_ip".to_string(), "1.2.3.4".to_string())
+                && env[1] == ("common_name".to_string(), "TestClient".to_string())
+        ));
     }
 
     #[test]
     fn decode_client_address_single_line() {
         let msgs = decode_all(">CLIENT:ADDRESS,3,10.0.0.5,1\n");
         assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
-            OvpnMessage::Notification(Notification::ClientAddress { cid, addr, primary }) => {
-                assert_eq!(*cid, 3);
-                assert_eq!(addr, "10.0.0.5");
-                assert!(*primary);
-            }
-            other => panic!("unexpected: {other:?}"),
-        }
+        assert!(matches!(
+            &msgs[0],
+            OvpnMessage::Notification(Notification::ClientAddress {
+                cid: 3,
+                addr,
+                primary: true,
+            }) if addr == "10.0.0.5"
+        ));
     }
 
     #[test]
@@ -1512,34 +1506,44 @@ mod tests {
             >CLIENT:ENV,END\n";
         let msgs = decode_all(input);
         assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
+        assert!(matches!(
+            &msgs[0],
             OvpnMessage::Notification(Notification::Client {
-                event,
-                cid,
-                kid,
+                event: ClientEvent::Disconnect,
+                cid: 5,
+                kid: None,
                 env,
-            }) => {
-                assert_eq!(*event, ClientEvent::Disconnect);
-                assert_eq!(*cid, 5);
-                assert_eq!(*kid, None);
-                assert_eq!(env.len(), 2);
-            }
-            other => panic!("unexpected: {other:?}"),
-        }
+            }) if env.len() == 2
+        ));
+    }
+
+    #[test]
+    fn decode_password_prompt_no_newline_with_cr() {
+        // OpenVPN sends "ENTER PASSWORD:" without \n. Some builds may
+        // include a trailing \r. The decoder must consume the \r and
+        // still produce PasswordPrompt.
+        let msgs = decode_all("ENTER PASSWORD:\r");
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0], OvpnMessage::PasswordPrompt);
+    }
+
+    #[test]
+    fn decode_password_prompt_no_newline_without_cr() {
+        let msgs = decode_all("ENTER PASSWORD:");
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0], OvpnMessage::PasswordPrompt);
     }
 
     #[test]
     fn decode_password_notification() {
         let msgs = decode_all(">PASSWORD:Need 'Auth' username/password\n");
         assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
+        assert!(matches!(
+            &msgs[0],
             OvpnMessage::Notification(Notification::Password(PasswordNotification::NeedAuth {
-                auth_type,
-            })) => {
-                assert_eq!(*auth_type, AuthType::Auth);
-            }
-            other => panic!("unexpected: {other:?}"),
-        }
+                auth_type: AuthType::Auth,
+            }))
+        ));
     }
 
     #[test]
@@ -1563,25 +1567,22 @@ mod tests {
             ">NEED-OK:Need 'token-insertion-request' confirmation MSG:Please insert your token\n",
         );
         assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
-            OvpnMessage::Notification(Notification::NeedOk { name, message }) => {
-                assert_eq!(name, "token-insertion-request");
-                assert_eq!(message, "Please insert your token");
-            }
-            other => panic!("unexpected: {other:?}"),
-        }
+        assert!(matches!(
+            &msgs[0],
+            OvpnMessage::Notification(Notification::NeedOk { name, message })
+                if name == "token-insertion-request" && message == "Please insert your token"
+        ));
     }
 
     #[test]
     fn decode_hold_notification() {
         let msgs = decode_all(">HOLD:Waiting for hold release\n");
         assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
-            OvpnMessage::Notification(Notification::Hold { text }) => {
-                assert_eq!(text, "Waiting for hold release");
-            }
-            other => panic!("unexpected: {other:?}"),
-        }
+        assert!(matches!(
+            &msgs[0],
+            OvpnMessage::Notification(Notification::Hold { text })
+                if text == "Waiting for hold release"
+        ));
     }
 
     // ── RawMultiLine tests ──────────────────────────────────────
@@ -1601,12 +1602,10 @@ mod tests {
             "line1\nline2\nEND\n",
         );
         assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
-            OvpnMessage::MultiLine(lines) => {
-                assert_eq!(lines, &["line1", "line2"]);
-            }
-            other => panic!("expected MultiLine, got: {other:?}"),
-        }
+        assert!(matches!(
+            &msgs[0],
+            OvpnMessage::MultiLine(lines) if lines == &["line1", "line2"]
+        ));
     }
 
     #[test]
@@ -1678,10 +1677,10 @@ mod tests {
             msgs.push(msg);
         }
         assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
-            OvpnMessage::MultiLine(lines) => assert_eq!(lines.len(), 500),
-            other => panic!("expected MultiLine, got: {other:?}"),
-        }
+        assert!(matches!(
+            &msgs[0],
+            OvpnMessage::MultiLine(lines) if lines.len() == 500
+        ));
     }
 
     #[test]
@@ -1721,10 +1720,10 @@ mod tests {
             msgs.push(msg);
         }
         assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
-            OvpnMessage::MultiLine(lines) => assert_eq!(lines.len(), 3),
-            other => panic!("expected MultiLine, got: {other:?}"),
-        }
+        assert!(matches!(
+            &msgs[0],
+            OvpnMessage::MultiLine(lines) if lines.len() == 3
+        ));
     }
 
     #[test]
@@ -1773,11 +1772,14 @@ mod tests {
         // State should be reset — next valid line should decode cleanly
         // as an Unrecognized (since expected was reset to SuccessOrError).
         dec.extend_from_slice(b"SUCCESS: recovered\n");
-        let msg = codec.decode(&mut dec).unwrap();
-        match msg {
-            Some(OvpnMessage::Success(ref s)) if s.contains("recovered") => {}
-            other => panic!("expected Success after UTF-8 reset, got: {other:?}"),
-        }
+        let msg = codec
+            .decode(&mut dec)
+            .unwrap()
+            .expect("should produce a message");
+        assert!(
+            matches!(&msg, OvpnMessage::Success(s) if s.contains("recovered")),
+            "expected Success containing 'recovered', got {msg:?}"
+        );
     }
 
     #[test]
@@ -1791,10 +1793,13 @@ mod tests {
         assert!(codec.decode(&mut dec).is_err());
         // State should be reset.
         dec.extend_from_slice(b"SUCCESS: ok\n");
-        let msg = codec.decode(&mut dec).unwrap();
-        match msg {
-            Some(OvpnMessage::Success(_)) => {}
-            other => panic!("expected Success after UTF-8 reset, got: {other:?}"),
-        }
+        let msg = codec
+            .decode(&mut dec)
+            .unwrap()
+            .expect("should produce a message");
+        assert!(
+            matches!(&msg, OvpnMessage::Success(_)),
+            "expected Success after UTF-8 reset, got {msg:?}"
+        );
     }
 }

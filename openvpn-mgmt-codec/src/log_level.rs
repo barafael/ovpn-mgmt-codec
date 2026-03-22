@@ -1,50 +1,50 @@
-use std::fmt;
+use std::str::FromStr;
+
+/// Error returned when a string is not a recognized log level.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unrecognized log level: {0:?}")]
+pub struct ParseLogLevelError(pub String);
 
 /// Log severity level from `>LOG:` notifications.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, strum::Display)]
 pub enum LogLevel {
     /// Informational message (`I`).
+    #[strum(to_string = "I")]
     Info,
 
     /// Debug message (`D`).
+    #[strum(to_string = "D")]
     Debug,
 
     /// Warning (`W`).
+    #[strum(to_string = "W")]
     Warning,
 
     /// Non-fatal error (`N`).
+    #[strum(to_string = "N")]
     NonFatal,
 
     /// Fatal error (`F`).
+    #[strum(to_string = "F")]
     Fatal,
 
     /// An unrecognized log flag (forward compatibility).
-    Custom(String),
+    #[strum(default)]
+    Unknown(String),
 }
 
-impl LogLevel {
-    /// Parse a wire log-flag string into a typed variant.
-    pub(crate) fn parse(s: &str) -> Self {
+impl FromStr for LogLevel {
+    type Err = ParseLogLevelError;
+
+    /// Parse a recognized log-flag string: `I`, `D`, `W`, `N`, `F`.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "I" => Self::Info,
-            "D" => Self::Debug,
-            "W" => Self::Warning,
-            "N" => Self::NonFatal,
-            "F" => Self::Fatal,
-            other => Self::Custom(other.to_string()),
-        }
-    }
-}
-
-impl fmt::Display for LogLevel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Info => f.write_str("I"),
-            Self::Debug => f.write_str("D"),
-            Self::Warning => f.write_str("W"),
-            Self::NonFatal => f.write_str("N"),
-            Self::Fatal => f.write_str("F"),
-            Self::Custom(s) => f.write_str(s),
+            "I" => Ok(Self::Info),
+            "D" => Ok(Self::Debug),
+            "W" => Ok(Self::Warning),
+            "N" => Ok(Self::NonFatal),
+            "F" => Ok(Self::Fatal),
+            other => Err(ParseLogLevelError(other.to_string())),
         }
     }
 }

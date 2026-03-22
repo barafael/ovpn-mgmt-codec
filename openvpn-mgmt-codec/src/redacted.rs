@@ -1,4 +1,4 @@
-//! A wrapper type that masks sensitive values in [`Debug`] and [`Display`]
+//! A wrapper type that masks sensitive values in `Debug` and `Display`
 //! output to prevent accidental exposure in logs.
 
 use derive_more::{Debug, Display};

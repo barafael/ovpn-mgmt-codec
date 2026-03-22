@@ -65,8 +65,8 @@ fn state_all_fields_empty_trailing_commas() {
             assert_eq!(description, "");
             assert_eq!(local_ip, "");
             assert_eq!(remote_ip, "");
-            assert_eq!(local_port, "");
-            assert_eq!(remote_port, "");
+            assert_eq!(*local_port, None);
+            assert_eq!(*remote_port, None);
         }
         other => panic!("expected State notification, got: {other:?}"),
     }
@@ -394,8 +394,8 @@ fn client_unknown_event_type_still_accumulates_env() {
             kid,
             env,
         }) => {
-            // Unknown event type should parse into Custom variant.
-            assert_eq!(*event, ClientEvent::Custom("FUTURE_EVENT".into()));
+            // Unknown event type should parse into Unknown variant.
+            assert_eq!(*event, ClientEvent::Unknown("FUTURE_EVENT".into()));
             assert_eq!(*cid, 7);
             assert_eq!(*kid, Some(2));
             assert_eq!(env.len(), 1);

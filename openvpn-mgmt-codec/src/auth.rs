@@ -1,58 +1,63 @@
-use std::fmt;
 use std::str::FromStr;
+
+/// Error returned when a string is not a recognized auth type.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unrecognized auth type: {0:?}")]
+pub struct ParseAuthTypeError(pub String);
+
+/// Error returned when a string is not a recognized auth retry mode.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unrecognized auth retry mode: {0:?}")]
+pub struct ParseAuthRetryModeError(pub String);
 
 /// Authentication credential type. OpenVPN identifies credential requests
 /// by a quoted type string — usually `"Auth"` or `"Private Key"`, but
 /// plugins can define custom types.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, strum::Display)]
 pub enum AuthType {
     /// Standard `--auth-user-pass` credentials. Wire: `"Auth"`.
     Auth,
 
     /// Private key passphrase (encrypted key file). Wire: `"Private Key"`.
+    #[strum(to_string = "Private Key")]
     PrivateKey,
 
     /// HTTP proxy credentials. Wire: `"HTTP Proxy"`.
+    #[strum(to_string = "HTTP Proxy")]
     HttpProxy,
 
     /// SOCKS proxy credentials. Wire: `"SOCKS Proxy"`.
+    #[strum(to_string = "SOCKS Proxy")]
     SocksProxy,
 
     /// Plugin-defined or otherwise unrecognized auth type.
-    Custom(String),
+    #[strum(default)]
+    Unknown(String),
 }
 
-impl fmt::Display for AuthType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Auth => f.write_str("Auth"),
-            Self::PrivateKey => f.write_str("Private Key"),
-            Self::HttpProxy => f.write_str("HTTP Proxy"),
-            Self::SocksProxy => f.write_str("SOCKS Proxy"),
-            Self::Custom(s) => f.write_str(s),
+impl FromStr for AuthType {
+    type Err = ParseAuthTypeError;
+
+    /// Parse a recognized auth type string.
+    ///
+    /// Recognized values: `Auth`, `PrivateKey` / `Private Key`,
+    /// `HTTPProxy` / `HTTP Proxy`, `SOCKSProxy` / `SOCKS Proxy`.
+    /// Returns `Err` for anything else — use [`AuthType::Unknown`] explicitly
+    /// if forward-compatible fallback is desired.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Auth" => Ok(Self::Auth),
+            "PrivateKey" | "Private Key" => Ok(Self::PrivateKey),
+            "HTTPProxy" | "HTTP Proxy" => Ok(Self::HttpProxy),
+            "SOCKSProxy" | "SOCKS Proxy" => Ok(Self::SocksProxy),
+            other => Err(ParseAuthTypeError(other.to_string())),
         }
     }
 }
 
-impl FromStr for AuthType {
-    type Err = std::convert::Infallible;
-
-    /// Parse an auth type string. Recognized values: `Auth`, `PrivateKey` /
-    /// `Private Key`, `HTTPProxy` / `HTTP Proxy`, `SOCKSProxy` / `SOCKS Proxy`.
-    /// Anything else becomes [`AuthType::Custom`].
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "Auth" => Self::Auth,
-            "PrivateKey" | "Private Key" => Self::PrivateKey,
-            "HTTPProxy" | "HTTP Proxy" => Self::HttpProxy,
-            "SOCKSProxy" | "SOCKS Proxy" => Self::SocksProxy,
-            other => Self::Custom(other.to_string()),
-        })
-    }
-}
-
 /// Controls how OpenVPN retries after authentication failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
+#[strum(serialize_all = "lowercase")]
 pub enum AuthRetryMode {
     /// Don't retry — exit on auth failure.
     None,
@@ -61,21 +66,12 @@ pub enum AuthRetryMode {
     Interact,
 
     /// Retry without re-prompting.
+    #[strum(to_string = "nointeract")]
     NoInteract,
 }
 
-impl fmt::Display for AuthRetryMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::None => f.write_str("none"),
-            Self::Interact => f.write_str("interact"),
-            Self::NoInteract => f.write_str("nointeract"),
-        }
-    }
-}
-
 impl FromStr for AuthRetryMode {
-    type Err = String;
+    type Err = ParseAuthRetryModeError;
 
     /// Parse an auth-retry mode: `none`, `interact`, or `nointeract`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -83,9 +79,7 @@ impl FromStr for AuthRetryMode {
             "none" => Ok(Self::None),
             "interact" => Ok(Self::Interact),
             "nointeract" => Ok(Self::NoInteract),
-            _ => Err(format!(
-                "invalid auth-retry mode: {s} (use none/interact/nointeract)"
-            )),
+            other => Err(ParseAuthRetryModeError(other.to_string())),
         }
     }
 }
@@ -128,11 +122,17 @@ mod tests {
     }
 
     #[test]
-    fn auth_type_custom_fallback() {
-        assert_eq!(
-            "MyPlugin".parse::<AuthType>().unwrap(),
-            AuthType::Custom("MyPlugin".to_string())
-        );
+    fn auth_type_unknown_is_err() {
+        assert!("MyPlugin".parse::<AuthType>().is_err());
+    }
+
+    #[test]
+    fn auth_type_unknown_falls_back() {
+        let s = "MyPlugin";
+        let at: AuthType = s
+            .parse()
+            .unwrap_or_else(|_| AuthType::Unknown(s.to_string()));
+        assert_eq!(at, AuthType::Unknown("MyPlugin".to_string()));
     }
 
     #[test]

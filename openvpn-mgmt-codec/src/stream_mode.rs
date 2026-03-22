@@ -1,6 +1,11 @@
 use std::fmt;
 use std::str::FromStr;
 
+/// Error returned when a string is not a recognized stream mode.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unrecognized stream mode: {0:?}")]
+pub struct ParseStreamModeError(pub String);
+
 /// Mode selector for commands that share the on/off/all/on-all/N grammar.
 /// This is used by `log`, `state`, and `echo`, all of which support
 /// identical sub-commands.
@@ -37,7 +42,7 @@ impl fmt::Display for StreamMode {
 }
 
 impl FromStr for StreamMode {
-    type Err = String;
+    type Err = ParseStreamModeError;
 
     /// Parse a stream mode string: `on`, `off`, `all`, `on all`, or a number.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -49,7 +54,7 @@ impl FromStr for StreamMode {
             n => n
                 .parse::<u32>()
                 .map(Self::Recent)
-                .map_err(|_| format!("invalid stream mode: {s} (use on/off/all/on all/N)")),
+                .map_err(|_| ParseStreamModeError(s.to_string())),
         }
     }
 }

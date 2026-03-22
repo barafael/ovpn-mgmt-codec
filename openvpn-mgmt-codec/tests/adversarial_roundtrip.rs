@@ -134,7 +134,7 @@ fn username_with_cr_lf() {
 #[test]
 fn custom_auth_type_with_spaces() {
     let wire = encode_str(OvpnCommand::Password {
-        auth_type: AuthType::Custom("My Custom Auth".to_string()),
+        auth_type: AuthType::Unknown("My Custom Auth".to_string()),
         value: "pass".into(),
     });
     assert_eq!(wire.lines().count(), 1);
@@ -145,7 +145,7 @@ fn custom_auth_type_with_spaces() {
 #[test]
 fn custom_auth_type_with_quotes() {
     let wire = encode_str(OvpnCommand::Password {
-        auth_type: AuthType::Custom(r#"Auth"Evil"#.to_string()),
+        auth_type: AuthType::Unknown(r#"Auth"Evil"#.to_string()),
         value: "pass".into(),
     });
     assert_eq!(wire.lines().count(), 1);

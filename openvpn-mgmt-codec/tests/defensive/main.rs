@@ -3,7 +3,7 @@
 //! The [protocol spec][spec] was designed for a trusted, local management
 //! client and is silent on what happens when string values contain
 //! newlines, when multi-line block bodies contain a bare `END` line, or
-//! when `AuthType::Custom` carries metacharacters.
+//! when `AuthType::Unknown` carries metacharacters.
 //!
 //! These tests cover both encoder modes:
 //! - **Sanitize** (default): asserts safe stripping/escaping behavior.
@@ -361,16 +361,16 @@ fn client_auth_newline_in_config_line_must_not_inject() {
 }
 
 // ═════════════════════════════════════════════════════════════════════
-// 4. auth_type quote breakout via AuthType::Custom
+// 4. auth_type quote breakout via AuthType::Unknown
 // ═════════════════════════════════════════════════════════════════════
 //
 // auth_type is manually wrapped in `"..."` without escaping.
-// A Custom type containing `"` breaks out of the quoting.
+// An Unknown type containing `"` breaks out of the quoting.
 
 #[test]
 fn custom_auth_type_with_quote_must_not_break_framing() {
     let wire = encode(OvpnCommand::Username {
-        auth_type: AuthType::Custom("Auth\" injected".into()),
+        auth_type: AuthType::Unknown("Auth\" injected".into()),
         value: "admin".into(),
     });
 
@@ -387,14 +387,14 @@ fn custom_auth_type_with_quote_must_not_break_framing() {
 #[test]
 fn custom_auth_type_with_newline_must_not_inject_command() {
     let wire = encode(OvpnCommand::Password {
-        auth_type: AuthType::Custom("Auth\nsignal SIGTERM".into()),
+        auth_type: AuthType::Unknown("Auth\nsignal SIGTERM".into()),
         value: "pass".into(),
     });
 
     let line_count = wire.lines().count();
     assert_eq!(
         line_count, 1,
-        "Custom auth_type with embedded newline produced {line_count} wire \
+        "Unknown auth_type with embedded newline produced {line_count} wire \
          lines — command injection!\nwire: {wire:?}"
     );
 }
@@ -525,7 +525,7 @@ fn client_auth_end_injection_roundtrip() {
 #[test]
 fn kill_address_ip_newline_must_not_inject_command() {
     let wire = encode(OvpnCommand::Kill(KillTarget::Address {
-        protocol: "tcp".to_string(),
+        protocol: TransportProtocol::Tcp,
         ip: "10.0.0.1\nsignal SIGTERM".to_string(),
         port: 1194,
     }));
@@ -846,7 +846,7 @@ fn strict_kill_common_name_newline_rejected() {
 fn strict_kill_address_ip_newline_rejected() {
     assert!(
         try_encode_strict(OvpnCommand::Kill(KillTarget::Address {
-            protocol: "tcp".to_string(),
+            protocol: TransportProtocol::Tcp,
             ip: "10.0.0.1\nsignal SIGTERM".to_string(),
             port: 1194,
         }))
@@ -1016,7 +1016,7 @@ fn strict_client_auth_newline_in_config_line_rejected() {
 fn strict_custom_auth_type_with_newline_rejected() {
     assert!(
         try_encode_strict(OvpnCommand::Password {
-            auth_type: AuthType::Custom("Auth\nsignal SIGTERM".into()),
+            auth_type: AuthType::Unknown("Auth\nsignal SIGTERM".into()),
             value: "pass".into(),
         })
         .is_err()

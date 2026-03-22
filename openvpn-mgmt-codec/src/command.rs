@@ -1,14 +1,39 @@
 use std::str::FromStr;
 
-use crate::auth::{AuthRetryMode, AuthType};
-use crate::kill_target::KillTarget;
-use crate::need_ok::NeedOkResponse;
-use crate::proxy_action::ProxyAction;
-use crate::redacted::Redacted;
-use crate::remote_action::RemoteAction;
-use crate::signal::Signal;
-use crate::status_format::StatusFormat;
-use crate::stream_mode::StreamMode;
+use crate::{
+    auth::{AuthRetryMode, AuthType, ParseAuthRetryModeError},
+    kill_target::KillTarget,
+    need_ok::NeedOkResponse,
+    proxy_action::ProxyAction,
+    redacted::Redacted,
+    remote_action::RemoteAction,
+    signal::{ParseSignalError, Signal},
+    status_format::StatusFormat,
+    stream_mode::{ParseStreamModeError, StreamMode},
+    transport_protocol::TransportProtocol,
+};
+use tracing::warn;
+
+/// Error returned when parsing a command string fails.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum CommandParseError {
+    /// Unrecognized signal name.
+    #[error(transparent)]
+    Signal(#[from] ParseSignalError),
+
+    /// Unrecognized stream mode.
+    #[error(transparent)]
+    StreamMode(#[from] ParseStreamModeError),
+
+    /// Unrecognized auth retry mode.
+    #[error(transparent)]
+    AuthRetryMode(#[from] ParseAuthRetryModeError),
+
+    /// Malformed command syntax (wrong number of arguments, non-numeric
+    /// values where numbers are expected, etc.).
+    #[error("{0}")]
+    Syntax(String),
+}
 
 /// Every command the management interface accepts, modeled as a typed enum.
 ///
@@ -303,9 +328,10 @@ pub enum OvpnCommand {
     /// Send a raw command string, expecting a multi-line (END-terminated)
     /// response.
     ///
-    /// Like [`Raw`], the string is passed through the encoder's wire-safety
-    /// gate before sending (see [`crate::EncoderMode`]). Unlike `Raw`, the
-    /// decoder accumulates the response into [`OvpnMessage::MultiLine`].
+    /// Like [`Raw`](Self::Raw), the string is passed through the encoder's
+    /// wire-safety gate before sending (see [`crate::EncoderMode`]). Unlike
+    /// `Raw`, the decoder accumulates the response into
+    /// [`OvpnMessage::MultiLine`](crate::OvpnMessage::MultiLine).
     RawMultiLine(String),
 }
 
@@ -356,7 +382,7 @@ impl OvpnCommand {
 }
 
 impl FromStr for OvpnCommand {
-    type Err = String;
+    type Err = CommandParseError;
 
     /// Parse a human-readable command string into an [`OvpnCommand`].
     ///
@@ -381,6 +407,11 @@ impl FromStr for OvpnCommand {
     /// assert_eq!(cmd, OvpnCommand::StateStream(openvpn_mgmt_codec::StreamMode::OnAll));
     /// ```
     fn from_str(line: &str) -> Result<Self, Self::Err> {
+        /// Shorthand for `Err(CommandParseError::Syntax(...))`.
+        fn cmd_err<T>(msg: impl Into<String>) -> Result<T, CommandParseError> {
+            Err(CommandParseError::Syntax(msg.into()))
+        }
+
         let line = line.trim();
         let (cmd, args) = line
             .split_once(char::is_whitespace)
@@ -399,16 +430,16 @@ impl FromStr for OvpnCommand {
                 "" | "1" => Ok(Self::Status(StatusFormat::V1)),
                 "2" => Ok(Self::Status(StatusFormat::V2)),
                 "3" => Ok(Self::Status(StatusFormat::V3)),
-                _ => Err(format!("invalid status format: {args} (use 1, 2, or 3)")),
+                _ => cmd_err(format!("invalid status format: {args} (use 1, 2, or 3)")),
             },
 
             "state" => match args {
                 "" => Ok(Self::State),
-                other => other.parse::<StreamMode>().map(Self::StateStream),
+                other => Ok(Self::StateStream(other.parse::<StreamMode>()?)),
             },
 
-            "log" => args.parse::<StreamMode>().map(Self::Log),
-            "echo" => args.parse::<StreamMode>().map(Self::Echo),
+            "log" => Ok(Self::Log(args.parse::<StreamMode>()?)),
+            "echo" => Ok(Self::Echo(args.parse::<StreamMode>()?)),
 
             "verb" => {
                 if args.is_empty() {
@@ -416,7 +447,9 @@ impl FromStr for OvpnCommand {
                 } else {
                     args.parse::<u8>()
                         .map(|n| Self::Verb(Some(n)))
-                        .map_err(|_| format!("invalid verbosity: {args} (0-15)"))
+                        .map_err(|_| {
+                            CommandParseError::Syntax(format!("invalid verbosity: {args} (0-15)"))
+                        })
                 }
             }
 
@@ -426,28 +459,32 @@ impl FromStr for OvpnCommand {
                 } else {
                     args.parse::<u32>()
                         .map(|n| Self::Mute(Some(n)))
-                        .map_err(|_| format!("invalid mute value: {args}"))
+                        .map_err(|_| {
+                            CommandParseError::Syntax(format!("invalid mute value: {args}"))
+                        })
                 }
             }
 
-            "bytecount" => args
-                .parse::<u32>()
-                .map(Self::ByteCount)
-                .map_err(|_| format!("bytecount requires a number, got: {args}")),
+            "bytecount" => args.parse::<u32>().map(Self::ByteCount).map_err(|_| {
+                CommandParseError::Syntax(format!("bytecount requires a number, got: {args}"))
+            }),
 
             // ── Connection control ───────────────────────────────────
-            "signal" => args.parse::<Signal>().map(Self::Signal),
+            "signal" => Ok(Self::Signal(args.parse::<Signal>()?)),
 
             "kill" => {
                 if args.is_empty() {
-                    return Err("kill requires a target (common name or proto:ip:port)".into());
+                    return cmd_err("kill requires a target (common name or proto:ip:port)");
                 }
                 let parts: Vec<&str> = args.splitn(3, ':').collect();
                 if parts.len() == 3
                     && let Ok(port) = parts[2].parse::<u16>()
                 {
                     return Ok(Self::Kill(KillTarget::Address {
-                        protocol: parts[0].to_string(),
+                        protocol: parts[0]
+                            .parse()
+                            .inspect_err(|error| warn!(%error, "unknown transport protocol"))
+                            .unwrap_or_else(|_| TransportProtocol::Unknown(parts[0].to_string())),
                         ip: parts[1].to_string(),
                         port,
                     }));
@@ -460,43 +497,57 @@ impl FromStr for OvpnCommand {
                 "on" => Ok(Self::HoldOn),
                 "off" => Ok(Self::HoldOff),
                 "release" => Ok(Self::HoldRelease),
-                _ => Err(format!("invalid hold argument: {args}")),
+                _ => cmd_err(format!("invalid hold argument: {args}")),
             },
 
             // ── Authentication ───────────────────────────────────────
             "username" => {
-                let (auth_type, value) = args
-                    .split_once(char::is_whitespace)
-                    .ok_or("usage: username <auth-type> <value>")?;
+                let (auth_type, value) =
+                    args.split_once(char::is_whitespace)
+                        .ok_or(CommandParseError::Syntax(
+                            "usage: username <auth-type> <value>".into(),
+                        ))?;
                 Ok(Self::Username {
-                    auth_type: auth_type.parse().unwrap(),
+                    auth_type: auth_type
+                        .parse()
+                        .inspect_err(|error| warn!(%error, "unknown auth type"))
+                        .unwrap_or_else(|_| AuthType::Unknown(auth_type.to_string())),
                     value: value.trim().into(),
                 })
             }
 
             "password" => {
-                let (auth_type, value) = args
-                    .split_once(char::is_whitespace)
-                    .ok_or("usage: password <auth-type> <value>")?;
+                let (auth_type, value) =
+                    args.split_once(char::is_whitespace)
+                        .ok_or(CommandParseError::Syntax(
+                            "usage: password <auth-type> <value>".into(),
+                        ))?;
                 Ok(Self::Password {
-                    auth_type: auth_type.parse().unwrap(),
+                    auth_type: auth_type
+                        .parse()
+                        .inspect_err(|error| warn!(%error, "unknown auth type"))
+                        .unwrap_or_else(|_| AuthType::Unknown(auth_type.to_string())),
                     value: value.trim().into(),
                 })
             }
 
-            "auth-retry" => args.parse::<AuthRetryMode>().map(Self::AuthRetry),
+            "auth-retry" => Ok(Self::AuthRetry(args.parse::<AuthRetryMode>()?)),
 
             "forget-passwords" => Ok(Self::ForgetPasswords),
 
             // ── Interactive prompts ──────────────────────────────────
             "needok" => {
-                let (name, resp) = args
-                    .rsplit_once(char::is_whitespace)
-                    .ok_or("usage: needok <name> ok|cancel")?;
+                let (name, resp) =
+                    args.rsplit_once(char::is_whitespace)
+                        .ok_or(CommandParseError::Syntax(
+                            "usage: needok <name> ok|cancel".into(),
+                        ))?;
                 let response = match resp {
                     "ok" => NeedOkResponse::Ok,
                     "cancel" => NeedOkResponse::Cancel,
-                    _ => return Err(format!("invalid needok response: {resp} (use ok/cancel)")),
+                    _ => {
+                        return cmd_err(format!("invalid needok response: {resp} (use ok/cancel)"));
+                    }
                 };
                 Ok(Self::NeedOk {
                     name: name.trim().to_string(),
@@ -505,9 +556,11 @@ impl FromStr for OvpnCommand {
             }
 
             "needstr" => {
-                let (name, value) = args
-                    .split_once(char::is_whitespace)
-                    .ok_or("usage: needstr <name> <value>")?;
+                let (name, value) =
+                    args.split_once(char::is_whitespace)
+                        .ok_or(CommandParseError::Syntax(
+                            "usage: needstr <name> <value>".into(),
+                        ))?;
                 Ok(Self::NeedStr {
                     name: name.to_string(),
                     value: value.trim().to_string(),
@@ -517,24 +570,27 @@ impl FromStr for OvpnCommand {
             // ── PKCS#11 ─────────────────────────────────────────────
             "pkcs11-id-count" => Ok(Self::Pkcs11IdCount),
 
-            "pkcs11-id-get" => args
-                .parse::<u32>()
-                .map(Self::Pkcs11IdGet)
-                .map_err(|_| format!("pkcs11-id-get requires a number, got: {args}")),
+            "pkcs11-id-get" => args.parse::<u32>().map(Self::Pkcs11IdGet).map_err(|_| {
+                CommandParseError::Syntax(format!("pkcs11-id-get requires a number, got: {args}"))
+            }),
 
             // ── Client management (server mode) ─────────────────────
             "client-auth" => {
                 let mut parts = args.splitn(3, char::is_whitespace);
                 let cid = parts
                     .next()
-                    .ok_or("usage: client-auth <cid> <kid> [config-lines]")?
+                    .ok_or(CommandParseError::Syntax(
+                        "usage: client-auth <cid> <kid> [config-lines]".into(),
+                    ))?
                     .parse::<u64>()
-                    .map_err(|_| "cid must be a number")?;
+                    .map_err(|_| CommandParseError::Syntax("cid must be a number".into()))?;
                 let kid = parts
                     .next()
-                    .ok_or("usage: client-auth <cid> <kid> [config-lines]")?
+                    .ok_or(CommandParseError::Syntax(
+                        "usage: client-auth <cid> <kid> [config-lines]".into(),
+                    ))?
                     .parse::<u64>()
-                    .map_err(|_| "kid must be a number")?;
+                    .map_err(|_| CommandParseError::Syntax("kid must be a number".into()))?;
                 let config_lines = match parts.next() {
                     Some(rest) => rest.split(',').map(|s| s.trim().to_string()).collect(),
                     None => vec![],
@@ -547,12 +603,19 @@ impl FromStr for OvpnCommand {
             }
 
             "client-auth-nt" => {
-                let (cid_s, kid_s) = args
-                    .split_once(char::is_whitespace)
-                    .ok_or("usage: client-auth-nt <cid> <kid>")?;
+                let (cid_s, kid_s) =
+                    args.split_once(char::is_whitespace)
+                        .ok_or(CommandParseError::Syntax(
+                            "usage: client-auth-nt <cid> <kid>".into(),
+                        ))?;
                 Ok(Self::ClientAuthNt {
-                    cid: cid_s.parse().map_err(|_| "cid must be a number")?,
-                    kid: kid_s.trim().parse().map_err(|_| "kid must be a number")?,
+                    cid: cid_s
+                        .parse()
+                        .map_err(|_| CommandParseError::Syntax("cid must be a number".into()))?,
+                    kid: kid_s
+                        .trim()
+                        .parse()
+                        .map_err(|_| CommandParseError::Syntax("kid must be a number".into()))?,
                 })
             }
 
@@ -560,17 +623,23 @@ impl FromStr for OvpnCommand {
                 let mut parts = args.splitn(4, char::is_whitespace);
                 let cid = parts
                     .next()
-                    .ok_or("usage: client-deny <cid> <kid> <reason> [client-reason]")?
+                    .ok_or(CommandParseError::Syntax(
+                        "usage: client-deny <cid> <kid> <reason> [client-reason]".into(),
+                    ))?
                     .parse::<u64>()
-                    .map_err(|_| "cid must be a number")?;
+                    .map_err(|_| CommandParseError::Syntax("cid must be a number".into()))?;
                 let kid = parts
                     .next()
-                    .ok_or("usage: client-deny <cid> <kid> <reason> [client-reason]")?
+                    .ok_or(CommandParseError::Syntax(
+                        "usage: client-deny <cid> <kid> <reason> [client-reason]".into(),
+                    ))?
                     .parse::<u64>()
-                    .map_err(|_| "kid must be a number")?;
+                    .map_err(|_| CommandParseError::Syntax("kid must be a number".into()))?;
                 let reason = parts
                     .next()
-                    .ok_or("usage: client-deny <cid> <kid> <reason> [client-reason]")?
+                    .ok_or(CommandParseError::Syntax(
+                        "usage: client-deny <cid> <kid> <reason> [client-reason]".into(),
+                    ))?
                     .to_string();
                 let client_reason = parts.next().map(|s| s.to_string());
                 Ok(Self::ClientDeny {
@@ -586,9 +655,11 @@ impl FromStr for OvpnCommand {
                     Some((c, m)) => (c, Some(m.trim().to_string())),
                     None => (args, None),
                 };
-                let cid = cid_str
-                    .parse::<u64>()
-                    .map_err(|_| format!("client-kill requires a CID number, got: {cid_str}"))?;
+                let cid = cid_str.parse::<u64>().map_err(|_| {
+                    CommandParseError::Syntax(format!(
+                        "client-kill requires a CID number, got: {cid_str}"
+                    ))
+                })?;
                 Ok(Self::ClientKill { cid, message })
             }
 
@@ -598,34 +669,42 @@ impl FromStr for OvpnCommand {
                 ["skip" | "SKIP"] => Ok(Self::Remote(RemoteAction::Skip)),
                 ["mod" | "MOD", host, port] => Ok(Self::Remote(RemoteAction::Modify {
                     host: host.to_string(),
-                    port: port.parse().map_err(|_| "port must be a number")?,
+                    port: port
+                        .parse()
+                        .map_err(|_| CommandParseError::Syntax("port must be a number".into()))?,
                 })),
-                _ => Err("usage: remote accept|skip|mod <host> <port>".into()),
+                _ => cmd_err("usage: remote accept|skip|mod <host> <port>"),
             },
 
             "proxy" => match args.split_whitespace().collect::<Vec<_>>().as_slice() {
                 ["none" | "NONE"] => Ok(Self::Proxy(ProxyAction::None)),
                 ["http" | "HTTP", host, port] => Ok(Self::Proxy(ProxyAction::Http {
                     host: host.to_string(),
-                    port: port.parse().map_err(|_| "port must be a number")?,
+                    port: port
+                        .parse()
+                        .map_err(|_| CommandParseError::Syntax("port must be a number".into()))?,
                     non_cleartext_only: false,
                 })),
                 ["http" | "HTTP", host, port, "nct"] => Ok(Self::Proxy(ProxyAction::Http {
                     host: host.to_string(),
-                    port: port.parse().map_err(|_| "port must be a number")?,
+                    port: port
+                        .parse()
+                        .map_err(|_| CommandParseError::Syntax("port must be a number".into()))?,
                     non_cleartext_only: true,
                 })),
                 ["socks" | "SOCKS", host, port] => Ok(Self::Proxy(ProxyAction::Socks {
                     host: host.to_string(),
-                    port: port.parse().map_err(|_| "port must be a number")?,
+                    port: port
+                        .parse()
+                        .map_err(|_| CommandParseError::Syntax("port must be a number".into()))?,
                 })),
-                _ => Err("usage: proxy none|http <host> <port> [nct]|socks <host> <port>".into()),
+                _ => cmd_err("usage: proxy none|http <host> <port> [nct]|socks <host> <port>"),
             },
 
             // ── Raw multi-line ──────────────────────────────────────
             "raw-ml" => {
                 if args.is_empty() {
-                    return Err("usage: raw-ml <command>".into());
+                    return cmd_err("usage: raw-ml <command>");
                 }
                 Ok(Self::RawMultiLine(args.to_string()))
             }
@@ -708,6 +787,37 @@ mod tests {
 
         let label: &str = (&OvpnCommand::ByteCount(5)).into();
         assert_eq!(label, "byte-count");
+    }
+
+    // ── connection_sequence ───────────────────────────────────────
+
+    #[test]
+    fn connection_sequence_with_bytecount() {
+        let cmds = connection_sequence(5);
+        assert_eq!(
+            cmds,
+            vec![
+                OvpnCommand::Log(StreamMode::OnAll),
+                OvpnCommand::StateStream(StreamMode::OnAll),
+                OvpnCommand::Pid,
+                OvpnCommand::ByteCount(5),
+                OvpnCommand::HoldRelease,
+            ]
+        );
+    }
+
+    #[test]
+    fn connection_sequence_without_bytecount() {
+        let cmds = connection_sequence(0);
+        assert_eq!(
+            cmds,
+            vec![
+                OvpnCommand::Log(StreamMode::OnAll),
+                OvpnCommand::StateStream(StreamMode::OnAll),
+                OvpnCommand::Pid,
+                OvpnCommand::HoldRelease,
+            ]
+        );
     }
 
     // ── FromStr: informational commands ──────────────────────────
@@ -851,7 +961,7 @@ mod tests {
         assert_eq!(
             "kill tcp:1.2.3.4:4000".parse(),
             Ok(OvpnCommand::Kill(KillTarget::Address {
-                protocol: "tcp".to_string(),
+                protocol: TransportProtocol::Tcp,
                 ip: "1.2.3.4".to_string(),
                 port: 4000,
             }))
@@ -1127,5 +1237,120 @@ mod tests {
             "  state  on  ".parse(),
             Ok(OvpnCommand::StateStream(StreamMode::On))
         );
+    }
+
+    // ── FromStr: error paths ────────────────────────────────────
+
+    #[test]
+    fn parse_state_invalid_stream_mode() {
+        assert!("state bogus".parse::<OvpnCommand>().is_err());
+    }
+
+    #[test]
+    fn parse_log_invalid_stream_mode() {
+        assert!("log bogus".parse::<OvpnCommand>().is_err());
+    }
+
+    #[test]
+    fn parse_echo_invalid_stream_mode() {
+        assert!("echo bogus".parse::<OvpnCommand>().is_err());
+    }
+
+    #[test]
+    fn parse_kill_unknown_protocol_falls_back() {
+        let cmd: OvpnCommand = "kill sctp:1.2.3.4:4000".parse().unwrap();
+        assert_eq!(
+            cmd,
+            OvpnCommand::Kill(KillTarget::Address {
+                protocol: TransportProtocol::Unknown("sctp".to_string()),
+                ip: "1.2.3.4".to_string(),
+                port: 4000,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_username_unknown_auth_type_falls_back() {
+        let cmd: OvpnCommand = "username MyPlugin alice".parse().unwrap();
+        assert_eq!(
+            cmd,
+            OvpnCommand::Username {
+                auth_type: AuthType::Unknown("MyPlugin".to_string()),
+                value: "alice".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_password_unknown_auth_type_falls_back() {
+        let cmd: OvpnCommand = "password MyPlugin s3cret".parse().unwrap();
+        assert_eq!(
+            cmd,
+            OvpnCommand::Password {
+                auth_type: AuthType::Unknown("MyPlugin".to_string()),
+                value: "s3cret".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_password_missing_value_is_err() {
+        assert!("password".parse::<OvpnCommand>().is_err());
+        assert!("password Auth".parse::<OvpnCommand>().is_err());
+    }
+
+    #[test]
+    fn parse_client_auth_non_numeric_cid() {
+        assert!("client-auth abc 1".parse::<OvpnCommand>().is_err());
+    }
+
+    #[test]
+    fn parse_client_auth_non_numeric_kid() {
+        assert!("client-auth 1 abc".parse::<OvpnCommand>().is_err());
+    }
+
+    #[test]
+    fn parse_client_auth_nt_non_numeric_kid() {
+        assert!("client-auth-nt 1 abc".parse::<OvpnCommand>().is_err());
+    }
+
+    #[test]
+    fn parse_client_deny_missing_args() {
+        assert!("client-deny".parse::<OvpnCommand>().is_err());
+        assert!("client-deny 1".parse::<OvpnCommand>().is_err());
+        assert!("client-deny 1 2".parse::<OvpnCommand>().is_err());
+    }
+
+    #[test]
+    fn parse_client_deny_non_numeric_ids() {
+        assert!("client-deny abc 1 reason".parse::<OvpnCommand>().is_err());
+        assert!("client-deny 1 abc reason".parse::<OvpnCommand>().is_err());
+    }
+
+    #[test]
+    fn parse_remote_non_numeric_port() {
+        assert!("remote mod host abc".parse::<OvpnCommand>().is_err());
+    }
+
+    #[test]
+    fn parse_proxy_non_numeric_port() {
+        assert!("proxy http host abc".parse::<OvpnCommand>().is_err());
+        assert!("proxy http host abc nct".parse::<OvpnCommand>().is_err());
+        assert!("proxy socks host abc".parse::<OvpnCommand>().is_err());
+    }
+
+    #[test]
+    fn parse_pkcs11_id_get_missing_arg() {
+        assert!("pkcs11-id-get".parse::<OvpnCommand>().is_err());
+    }
+
+    #[test]
+    fn parse_bytecount_non_numeric() {
+        assert!("bytecount abc".parse::<OvpnCommand>().is_err());
+    }
+
+    #[test]
+    fn parse_needstr_missing_value() {
+        assert!("needstr".parse::<OvpnCommand>().is_err());
     }
 }

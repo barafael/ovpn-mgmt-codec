@@ -16,7 +16,7 @@ command fields.  These tests cover the gap.
 | Newline injection in `quote_and_escape` | Embedded `\n` splits one command into two on the wire | `password "Auth" "hunter2\nsignal SIGTERM"` |
 | Newline injection in unescaped fields | Fields like `kill {cn}` are interpolated without any escaping | `kill victim\nsignal SIGTERM` |
 | `END` injection in multi-line blocks | A body line equal to `"END"` terminates the block early | `client-auth` config line of `"END"` followed by injected command |
-| `AuthType::Custom` quote breakout | Manual `"..."` wrapping without escaping lets `"` break framing | `username "Auth" injected" "admin"` |
+| `AuthType::Unknown` quote breakout | Manual `"..."` wrapping without escaping lets `"` break framing | `username "Auth" injected" "admin"` |
 | Round-trip proof | Encode a malicious payload, decode it, observe multiple messages | Proves the decoder actually parses the injected commands |
 
 ## Current status
@@ -24,7 +24,7 @@ command fields.  These tests cover the gap.
 All tests **pass**.  The encoder strips `\n`, `\r`, and `\0` from both
 quoted (`quote_and_escape`) and unquoted (`sanitize_line`) fields, escapes
 bare `END` lines in multi-line block bodies, and properly quotes
-`AuthType::Custom` values.  These tests serve as the regression suite.
+`AuthType::Unknown` values.  These tests serve as the regression suite.
 
 ## Relationship to protocol_test.rs
 

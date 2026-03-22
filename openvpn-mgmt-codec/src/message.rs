@@ -68,8 +68,10 @@ pub enum PasswordNotification {
     },
 }
 
-/// ENV key names whose values are masked in [`Debug`] output to prevent
-/// accidental exposure in logs.
+/// ENV key names whose values are masked in `Debug` output to prevent
+/// accidental exposure in logs. Used by `RedactedEnv` below (invoked from
+/// `derive_more::Debug` on [`Notification::Client::env`]).
+#[allow(dead_code)] // used via derive_more::Debug attribute
 const SENSITIVE_ENV_KEYS: &[&str] = &["password"];
 
 /// A parsed real-time notification from OpenVPN.
@@ -77,7 +79,7 @@ const SENSITIVE_ENV_KEYS: &[&str] = &["password"];
 /// The [`Debug`] implementation masks the values of known sensitive ENV
 /// keys (e.g. `password`) in [`Client`](Notification::Client) notifications,
 /// printing `<redacted>` instead.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(derive_more::Debug, Clone, PartialEq, Eq)]
 pub enum Notification {
     /// A multi-line `>CLIENT:` notification (CONNECT, REAUTH, ESTABLISHED,
     /// DISCONNECT). The header and all ENV key=value pairs are accumulated
@@ -92,6 +94,7 @@ pub enum Notification {
         /// Accumulated ENV pairs, in order. Each `>CLIENT:ENV,key=val` line
         /// becomes one `(key, val)` entry. The terminating `>CLIENT:ENV,END`
         /// is consumed but not included.
+        #[debug("{:?}", RedactedEnv(env))]
         env: Vec<(String, String)>,
     },
 
@@ -122,12 +125,12 @@ pub enum Notification {
         local_ip: String,
         /// (e) Remote server address (may be empty).
         remote_ip: String,
-        /// (f) Remote server port (may be empty).
-        remote_port: String,
+        /// (f) Remote server port (empty in many states).
+        remote_port: Option<u16>,
         /// (g) Local address (may be empty).
         local_addr: String,
-        /// (h) Local port (may be empty).
-        local_port: String,
+        /// (h) Local port (empty in many states).
+        local_port: Option<u16>,
         /// (i) TUN/TAP local IPv6 address (may be empty).
         local_ipv6: String,
     },
@@ -226,8 +229,8 @@ pub enum Notification {
     Proxy {
         /// Connection index (1-based).
         index: u32,
-        /// Proxy type string (e.g. `"TCP"`, `"UDP"`).
-        proxy_type: String,
+        /// Proxy type (e.g. `TCP`, `UDP`).
+        proxy_type: crate::transport_protocol::TransportProtocol,
         /// Server hostname or IP to connect through.
         host: String,
     },
@@ -246,6 +249,8 @@ pub enum Notification {
 }
 
 /// Helper for Debug output: displays env entries, masking sensitive keys.
+/// Constructed by `derive_more::Debug` on [`Notification::Client::env`].
+#[allow(dead_code)] // used via derive_more::Debug attribute
 struct RedactedEnv<'a>(&'a [(String, String)]);
 
 impl fmt::Debug for RedactedEnv<'_> {
@@ -262,134 +267,10 @@ impl fmt::Debug for RedactedEnv<'_> {
     }
 }
 
-impl fmt::Debug for Notification {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Client {
-                event,
-                cid,
-                kid,
-                env,
-            } => f
-                .debug_struct("Client")
-                .field("event", event)
-                .field("cid", cid)
-                .field("kid", kid)
-                .field("env", &RedactedEnv(env))
-                .finish(),
-            Self::ClientAddress { cid, addr, primary } => f
-                .debug_struct("ClientAddress")
-                .field("cid", cid)
-                .field("addr", addr)
-                .field("primary", primary)
-                .finish(),
-            Self::State {
-                timestamp,
-                name,
-                description,
-                local_ip,
-                remote_ip,
-                remote_port,
-                local_addr,
-                local_port,
-                local_ipv6,
-            } => f
-                .debug_struct("State")
-                .field("timestamp", timestamp)
-                .field("name", name)
-                .field("description", description)
-                .field("local_ip", local_ip)
-                .field("remote_ip", remote_ip)
-                .field("remote_port", remote_port)
-                .field("local_addr", local_addr)
-                .field("local_port", local_port)
-                .field("local_ipv6", local_ipv6)
-                .finish(),
-            Self::ByteCount {
-                bytes_in,
-                bytes_out,
-            } => f
-                .debug_struct("ByteCount")
-                .field("bytes_in", bytes_in)
-                .field("bytes_out", bytes_out)
-                .finish(),
-            Self::ByteCountCli {
-                cid,
-                bytes_in,
-                bytes_out,
-            } => f
-                .debug_struct("ByteCountCli")
-                .field("cid", cid)
-                .field("bytes_in", bytes_in)
-                .field("bytes_out", bytes_out)
-                .finish(),
-            Self::Log {
-                timestamp,
-                level,
-                message,
-            } => f
-                .debug_struct("Log")
-                .field("timestamp", timestamp)
-                .field("level", level)
-                .field("message", message)
-                .finish(),
-            Self::Echo { timestamp, param } => f
-                .debug_struct("Echo")
-                .field("timestamp", timestamp)
-                .field("param", param)
-                .finish(),
-            Self::Hold { text } => f.debug_struct("Hold").field("text", text).finish(),
-            Self::Fatal { message } => f.debug_struct("Fatal").field("message", message).finish(),
-            Self::Pkcs11IdCount { count } => f
-                .debug_struct("Pkcs11IdCount")
-                .field("count", count)
-                .finish(),
-            Self::NeedOk { name, message } => f
-                .debug_struct("NeedOk")
-                .field("name", name)
-                .field("message", message)
-                .finish(),
-            Self::NeedStr { name, message } => f
-                .debug_struct("NeedStr")
-                .field("name", name)
-                .field("message", message)
-                .finish(),
-            Self::RsaSign { data } => f.debug_struct("RsaSign").field("data", data).finish(),
-            Self::Remote {
-                host,
-                port,
-                protocol,
-            } => f
-                .debug_struct("Remote")
-                .field("host", host)
-                .field("port", port)
-                .field("protocol", protocol)
-                .finish(),
-            Self::Proxy {
-                index,
-                proxy_type,
-                host,
-            } => f
-                .debug_struct("Proxy")
-                .field("index", index)
-                .field("proxy_type", proxy_type)
-                .field("host", host)
-                .finish(),
-            Self::Password(p) => f.debug_tuple("Password").field(p).finish(),
-            Self::Simple { kind, payload } => f
-                .debug_struct("Simple")
-                .field("kind", kind)
-                .field("payload", payload)
-                .finish(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::transport_protocol::TransportProtocol;
-
     // ── Debug redaction ──────────────────────────────────────────
 
     #[test]
@@ -511,9 +392,9 @@ mod tests {
             description: "SUCCESS".to_string(),
             local_ip: "10.0.0.2".to_string(),
             remote_ip: "1.2.3.4".to_string(),
-            remote_port: "1194".to_string(),
+            remote_port: Some(1194),
             local_addr: "192.168.1.5".to_string(),
-            local_port: "51234".to_string(),
+            local_port: Some(51234),
             local_ipv6: String::new(),
         };
         let dbg = format!("{notif:?}");
@@ -603,7 +484,7 @@ mod tests {
     fn debug_proxy() {
         let notif = Notification::Proxy {
             index: 1,
-            proxy_type: "TCP".to_string(),
+            proxy_type: TransportProtocol::Tcp,
             host: "proxy.local".to_string(),
         };
         let dbg = format!("{notif:?}");

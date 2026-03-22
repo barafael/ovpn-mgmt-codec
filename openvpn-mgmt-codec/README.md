@@ -25,7 +25,7 @@ Add the crate to your project:
 
 ```toml
 [dependencies]
-openvpn-mgmt-codec = "0.3"
+openvpn-mgmt-codec = "0.5"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 ```
@@ -70,10 +70,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 `OvpnCodec` implements `Encoder<OvpnCommand>` and `Decoder` (Item =
 `OvpnMessage`).
 
-| Direction | Type          | Description                                                                                               |
-|-----------|---------------|-----------------------------------------------------------------------------------------------------------|
-| Encode    | `OvpnCommand` | One of 44 command variants -- serialised to the wire format with proper escaping and multi-line framing.  |
-| Decode    | `OvpnMessage` | `Success`, `Error`, `SingleValue`, `MultiLine`, `Notification`, `Info`, or `Unrecognized`.                |
+| Direction | Type          | Description                                                                                                    |
+|-----------|---------------|----------------------------------------------------------------------------------------------------------------|
+| Encode    | `OvpnCommand` | One of 44 command variants -- serialised to the wire format with proper escaping and multi-line framing.       |
+| Decode    | `OvpnMessage` | `Success`, `Error`, `MultiLine`, `Pkcs11IdEntry`, `Notification`, `Info`, `PasswordPrompt`, or `Unrecognized`. |
 
 Real-time notifications (`>STATE:`, `>BYTECOUNT:`, `>CLIENT:`, etc.) are
 emitted as `OvpnMessage::Notification` and can arrive at any time,

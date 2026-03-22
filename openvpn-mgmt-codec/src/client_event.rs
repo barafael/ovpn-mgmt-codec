@@ -1,7 +1,13 @@
-use std::fmt;
+use std::str::FromStr;
+
+/// Error returned when a string is not a recognized client event.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unrecognized client event: {0:?}")]
+pub struct ParseClientEventError(pub String);
 
 /// The sub-type of a `>CLIENT:` notification.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, strum::Display)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 pub enum ClientEvent {
     /// A new client is connecting (`>CLIENT:CONNECT`).
     Connect,
@@ -24,36 +30,28 @@ pub enum ClientEvent {
     CrResponse(String),
 
     /// An unrecognized event type (forward compatibility).
-    Custom(String),
+    #[strum(default)]
+    Unknown(String),
 }
 
-impl ClientEvent {
-    /// Parse a wire event string into a typed variant.
+impl FromStr for ClientEvent {
+    type Err = ParseClientEventError;
+
+    /// Parse a recognized client event string.
     ///
-    /// Note: `CR_RESPONSE` is handled separately in the codec's CLIENT
-    /// parser because it carries an extra trailing field (the base64
-    /// response). This method maps it to [`Custom`](Self::Custom) as a
-    /// fallback; the codec never calls `parse("CR_RESPONSE")`.
-    pub(crate) fn parse(s: &str) -> Self {
+    /// Recognized values: `CONNECT`, `REAUTH`, `ESTABLISHED`, `DISCONNECT`.
+    /// Returns `Err` for anything else — use [`ClientEvent::Unknown`]
+    /// explicitly if forward-compatible fallback is desired.
+    ///
+    /// Note: `CR_RESPONSE` is handled separately in the codec because it
+    /// carries an inline base64 field; it is not recognized by `FromStr`.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "CONNECT" => Self::Connect,
-            "REAUTH" => Self::Reauth,
-            "ESTABLISHED" => Self::Established,
-            "DISCONNECT" => Self::Disconnect,
-            other => Self::Custom(other.to_string()),
-        }
-    }
-}
-
-impl fmt::Display for ClientEvent {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Connect => f.write_str("CONNECT"),
-            Self::Reauth => f.write_str("REAUTH"),
-            Self::Established => f.write_str("ESTABLISHED"),
-            Self::Disconnect => f.write_str("DISCONNECT"),
-            Self::CrResponse(_) => f.write_str("CR_RESPONSE"),
-            Self::Custom(s) => f.write_str(s),
+            "CONNECT" => Ok(Self::Connect),
+            "REAUTH" => Ok(Self::Reauth),
+            "ESTABLISHED" => Ok(Self::Established),
+            "DISCONNECT" => Ok(Self::Disconnect),
+            other => Err(ParseClientEventError(other.to_string())),
         }
     }
 }

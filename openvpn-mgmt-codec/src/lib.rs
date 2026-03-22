@@ -43,21 +43,26 @@ pub mod unrecognized;
 /// Parsed version information from the `version` command.
 pub mod version_info;
 
-pub use auth::{AuthRetryMode, AuthType};
-pub use client_event::ClientEvent;
+pub use auth::{AuthRetryMode, AuthType, ParseAuthRetryModeError, ParseAuthTypeError};
+pub use client_event::{ClientEvent, ParseClientEventError};
 pub use codec::{AccumulationLimit, EncodeError, EncoderMode, OvpnCodec};
-pub use command::OvpnCommand;
+pub use command::{CommandParseError, OvpnCommand};
 pub use kill_target::KillTarget;
-pub use log_level::LogLevel;
+pub use log_level::{LogLevel, ParseLogLevelError};
 pub use message::{Notification, OvpnMessage, PasswordNotification};
 pub use need_ok::NeedOkResponse;
-pub use openvpn_state::OpenVpnState;
+pub use openvpn_state::{OpenVpnState, ParseOpenVpnStateError};
 pub use proxy_action::ProxyAction;
 pub use redacted::Redacted;
 pub use remote_action::RemoteAction;
-pub use signal::Signal;
-pub use status_format::StatusFormat;
-pub use stream_mode::StreamMode;
-pub use transport_protocol::TransportProtocol;
+pub use signal::{ParseSignalError, Signal};
+pub use status_format::{ParseStatusFormatError, StatusFormat};
+pub use stream_mode::{ParseStreamModeError, StreamMode};
+pub use transport_protocol::{ParseTransportProtocolError, TransportProtocol};
 pub use unrecognized::UnrecognizedKind;
 pub use version_info::VersionInfo;
+
+// Re-export key items from sub-modules for convenience.
+pub use command::connection_sequence;
+pub use parsed_response::{LoadStats, ParseResponseError};
+pub use stream::{ManagementEvent, classify};

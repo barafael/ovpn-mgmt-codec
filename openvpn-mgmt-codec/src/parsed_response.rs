@@ -10,7 +10,7 @@
 //! ```
 //! use openvpn_mgmt_codec::parsed_response::{parse_pid, parse_load_stats, LoadStats};
 //!
-//! assert_eq!(parse_pid("pid=12345"), Some(12345));
+//! assert_eq!(parse_pid("pid=12345"), Ok(12345));
 //!
 //! let stats = parse_load_stats("nclients=3,bytesin=100000,bytesout=50000").unwrap();
 //! assert_eq!(stats.nclients, 3);
@@ -31,17 +31,56 @@ pub struct LoadStats {
     pub bytesout: u64,
 }
 
+/// Error returned when a `SUCCESS:` payload cannot be parsed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ParseResponseError {
+    /// Expected `pid=N` but the prefix was missing.
+    #[error("missing 'pid=' prefix in: {0:?}")]
+    MissingPidPrefix(String),
+
+    /// Expected `hold=0` or `hold=1` but the prefix was missing.
+    #[error("missing 'hold=' prefix in: {0:?}")]
+    MissingHoldPrefix(String),
+
+    /// `hold=` value was not `0` or `1`.
+    #[error("invalid hold value: {0:?}")]
+    InvalidHoldValue(String),
+
+    /// A numeric field could not be parsed.
+    #[error("invalid integer for field {field:?}: {value:?}")]
+    InvalidInteger {
+        /// The field name that failed to parse.
+        field: &'static str,
+        /// The raw value that could not be parsed.
+        value: String,
+    },
+
+    /// A required field was missing from the `load-stats` payload.
+    #[error("missing field {0:?} in load-stats payload")]
+    MissingField(&'static str),
+
+    /// An unrecognized key appeared in the `load-stats` payload.
+    #[error("unexpected field {0:?} in load-stats payload")]
+    UnexpectedField(String),
+}
+
 /// Parse the `SUCCESS:` payload from a `pid` command.
 ///
 /// Expects the format `pid=N` and returns the PID as `u32`.
 ///
 /// ```
 /// use openvpn_mgmt_codec::parsed_response::parse_pid;
-/// assert_eq!(parse_pid("pid=12345"), Some(12345));
-/// assert_eq!(parse_pid("garbage"), None);
+/// assert_eq!(parse_pid("pid=12345"), Ok(12345));
+/// assert!(parse_pid("garbage").is_err());
 /// ```
-pub fn parse_pid(payload: &str) -> Option<u32> {
-    payload.strip_prefix("pid=")?.parse().ok()
+pub fn parse_pid(payload: &str) -> Result<u32, ParseResponseError> {
+    let val = payload
+        .strip_prefix("pid=")
+        .ok_or_else(|| ParseResponseError::MissingPidPrefix(payload.to_string()))?;
+    val.parse().map_err(|_| ParseResponseError::InvalidInteger {
+        field: "pid",
+        value: val.to_string(),
+    })
 }
 
 /// Parse the `SUCCESS:` payload from a `load-stats` command.
@@ -55,26 +94,32 @@ pub fn parse_pid(payload: &str) -> Option<u32> {
 /// assert_eq!(stats.bytesin, 1000);
 /// assert_eq!(stats.bytesout, 2000);
 /// ```
-pub fn parse_load_stats(payload: &str) -> Option<LoadStats> {
+pub fn parse_load_stats(payload: &str) -> Result<LoadStats, ParseResponseError> {
     let mut nclients = None;
     let mut bytesin = None;
     let mut bytesout = None;
 
     for part in payload.split(',') {
         if let Some((key, val)) = part.split_once('=') {
+            let parsed = |field| {
+                val.parse().map_err(|_| ParseResponseError::InvalidInteger {
+                    field,
+                    value: val.to_string(),
+                })
+            };
             match key {
-                "nclients" => nclients = val.parse().ok(),
-                "bytesin" => bytesin = val.parse().ok(),
-                "bytesout" => bytesout = val.parse().ok(),
-                _ => {}
+                "nclients" => nclients = Some(parsed("nclients")?),
+                "bytesin" => bytesin = Some(parsed("bytesin")?),
+                "bytesout" => bytesout = Some(parsed("bytesout")?),
+                other => return Err(ParseResponseError::UnexpectedField(other.to_string())),
             }
         }
     }
 
-    Some(LoadStats {
-        nclients: nclients?,
-        bytesin: bytesin?,
-        bytesout: bytesout?,
+    Ok(LoadStats {
+        nclients: nclients.ok_or(ParseResponseError::MissingField("nclients"))?,
+        bytesin: bytesin.ok_or(ParseResponseError::MissingField("bytesin"))?,
+        bytesout: bytesout.ok_or(ParseResponseError::MissingField("bytesout"))?,
     })
 }
 
@@ -85,14 +130,17 @@ pub fn parse_load_stats(payload: &str) -> Option<LoadStats> {
 ///
 /// ```
 /// use openvpn_mgmt_codec::parsed_response::parse_hold;
-/// assert_eq!(parse_hold("hold=1"), Some(true));
-/// assert_eq!(parse_hold("hold=0"), Some(false));
+/// assert_eq!(parse_hold("hold=1"), Ok(true));
+/// assert_eq!(parse_hold("hold=0"), Ok(false));
 /// ```
-pub fn parse_hold(payload: &str) -> Option<bool> {
-    match payload.strip_prefix("hold=")? {
-        "1" => Some(true),
-        "0" => Some(false),
-        _ => None,
+pub fn parse_hold(payload: &str) -> Result<bool, ParseResponseError> {
+    let val = payload
+        .strip_prefix("hold=")
+        .ok_or_else(|| ParseResponseError::MissingHoldPrefix(payload.to_string()))?;
+    match val {
+        "1" => Ok(true),
+        "0" => Ok(false),
+        _ => Err(ParseResponseError::InvalidHoldValue(val.to_string())),
     }
 }
 
@@ -119,25 +167,29 @@ pub fn parse_version(lines: &[String]) -> VersionInfo {
 mod tests {
     use super::*;
 
+    // ── parse_pid ────────────────────────────────────────────────
+
     #[test]
     fn pid_normal() {
-        assert_eq!(parse_pid("pid=42"), Some(42));
+        assert_eq!(parse_pid("pid=42"), Ok(42));
     }
 
     #[test]
     fn pid_zero() {
-        assert_eq!(parse_pid("pid=0"), Some(0));
+        assert_eq!(parse_pid("pid=0"), Ok(0));
     }
 
     #[test]
     fn pid_missing_prefix() {
-        assert_eq!(parse_pid("42"), None);
+        assert!(parse_pid("42").is_err());
     }
 
     #[test]
     fn pid_not_a_number() {
-        assert_eq!(parse_pid("pid=abc"), None);
+        assert!(parse_pid("pid=abc").is_err());
     }
+
+    // ── parse_load_stats ────────────────────────────────────────
 
     #[test]
     fn load_stats_normal() {
@@ -157,23 +209,51 @@ mod tests {
 
     #[test]
     fn load_stats_missing_field() {
-        assert!(parse_load_stats("nclients=1,bytesin=2").is_none());
+        let err = parse_load_stats("nclients=1,bytesin=2").unwrap_err();
+        assert!(matches!(err, ParseResponseError::MissingField("bytesout")));
     }
 
     #[test]
+    fn load_stats_non_numeric_value() {
+        let err = parse_load_stats("nclients=abc,bytesin=2,bytesout=3").unwrap_err();
+        assert!(matches!(
+            err,
+            ParseResponseError::InvalidInteger {
+                field: "nclients",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn load_stats_unexpected_field() {
+        let err = parse_load_stats("nclients=1,bytesin=2,bytesout=3,extra=99").unwrap_err();
+        assert!(matches!(err, ParseResponseError::UnexpectedField(f) if f == "extra"));
+    }
+
+    // ── parse_hold ──────────────────────────────────────────────
+
+    #[test]
     fn hold_active() {
-        assert_eq!(parse_hold("hold=1"), Some(true));
+        assert_eq!(parse_hold("hold=1"), Ok(true));
     }
 
     #[test]
     fn hold_inactive() {
-        assert_eq!(parse_hold("hold=0"), Some(false));
+        assert_eq!(parse_hold("hold=0"), Ok(false));
     }
 
     #[test]
-    fn hold_garbage() {
-        assert_eq!(parse_hold("hold=maybe"), None);
+    fn hold_missing_prefix() {
+        assert!(parse_hold("garbage").is_err());
     }
+
+    #[test]
+    fn hold_invalid_value() {
+        assert!(parse_hold("hold=maybe").is_err());
+    }
+
+    // ── parse_version ───────────────────────────────────────────
 
     #[test]
     fn version_roundtrip() {

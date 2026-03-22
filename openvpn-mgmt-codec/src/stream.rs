@@ -5,7 +5,7 @@
 //! this an asynchronous notification?". This module provides
 //! [`ManagementEvent`] (the two-variant enum) and [`classify`] (a mapping
 //! function suitable for use with stream combinators like
-//! [`StreamExt::map`](futures::StreamExt::map)).
+//! `StreamExt::map`).
 //!
 //! # Example
 //!
@@ -173,10 +173,10 @@ mod tests {
     fn success_maps_to_response() {
         let msg = OvpnMessage::Success("pid=42".to_string());
         let event: ManagementEvent = msg.into();
-        assert!(matches!(
+        assert_eq!(
             event,
-            ManagementEvent::Response(OvpnMessage::Success(_))
-        ));
+            ManagementEvent::Response(OvpnMessage::Success("pid=42".to_string()))
+        );
     }
 
     #[test]
@@ -203,12 +203,13 @@ mod tests {
 
     #[test]
     fn classify_maps_ok() {
-        let result: Result<OvpnMessage, io::Error> = Ok(OvpnMessage::Success("test".to_string()));
+        let result: Result<OvpnMessage, io::Error> =
+            Ok(OvpnMessage::Success("it worked!".to_string()));
         let event = classify(result).unwrap();
-        assert!(matches!(
+        assert_eq!(
             event,
-            ManagementEvent::Response(OvpnMessage::Success(_))
-        ));
+            ManagementEvent::Response(OvpnMessage::Success("it worked!".to_string()))
+        );
     }
 
     #[test]

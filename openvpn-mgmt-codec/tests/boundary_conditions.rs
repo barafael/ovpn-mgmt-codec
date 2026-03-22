@@ -206,13 +206,13 @@ fn auth_type_display_roundtrip_including_custom() {
         AuthType::PrivateKey,
         AuthType::HttpProxy,
         AuthType::SocksProxy,
-        AuthType::Custom("MyPlugin".to_string()),
-        AuthType::Custom(String::new()),
     ] {
         let s = at.to_string();
         let parsed: AuthType = s.parse().unwrap();
         assert_eq!(parsed, at);
     }
+    // Unknown values don't roundtrip through FromStr (which is fallible).
+    assert!("MyPlugin".parse::<AuthType>().is_err());
 }
 
 #[test]
@@ -251,11 +251,11 @@ fn stream_mode_recent_zero() {
 
 #[test]
 fn auth_type_custom_empty_string() {
-    let at = AuthType::Custom(String::new());
+    let at = AuthType::Unknown(String::new());
     let s = at.to_string();
     assert_eq!(s, "");
-    let parsed: AuthType = s.parse().unwrap();
-    assert_eq!(parsed, AuthType::Custom(String::new()));
+    // Empty string is not a recognized auth type.
+    assert!(s.parse::<AuthType>().is_err());
 }
 
 #[test]
@@ -477,9 +477,9 @@ fn classify_notification_state() {
         description: String::new(),
         local_ip: String::new(),
         remote_ip: String::new(),
-        remote_port: String::new(),
+        remote_port: None,
         local_addr: String::new(),
-        local_port: String::new(),
+        local_port: None,
         local_ipv6: String::new(),
     })));
     assert!(matches!(

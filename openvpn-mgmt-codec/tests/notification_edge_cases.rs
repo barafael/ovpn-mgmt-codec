@@ -102,7 +102,7 @@ fn state_with_all_nine_fields() {
     } = n
     {
         assert_eq!(local_ipv6, "fd00::1");
-        assert_eq!(remote_port, "1194");
+        assert_eq!(remote_port, Some(1194));
     } else {
         panic!("expected State");
     }
@@ -112,7 +112,7 @@ fn state_with_all_nine_fields() {
 fn state_unknown_state_name() {
     let n = expect_notification(">STATE:1711000000,FUTURE_STATE,desc,,,,,\n");
     if let Notification::State { name, .. } = n {
-        assert!(matches!(name, OpenVpnState::Custom(s) if s == "FUTURE_STATE"));
+        assert!(matches!(name, OpenVpnState::Unknown(s) if s == "FUTURE_STATE"));
     } else {
         panic!("expected State");
     }
@@ -208,7 +208,7 @@ fn log_with_commas_in_message() {
 fn log_unknown_level() {
     let n = expect_notification(">LOG:1711000000,X,some message\n");
     if let Notification::Log { level, .. } = n {
-        assert!(matches!(level, LogLevel::Custom(s) if s == "X"));
+        assert!(matches!(level, LogLevel::Unknown(s) if s == "X"));
     } else {
         panic!("expected Log");
     }
@@ -298,7 +298,7 @@ fn password_custom_auth_type() {
     assert!(matches!(
         &n,
         Notification::Password(PasswordNotification::NeedAuth { auth_type })
-        if *auth_type == AuthType::Custom("MyPlugin".to_string())
+        if *auth_type == AuthType::Unknown("MyPlugin".to_string())
     ));
 }
 

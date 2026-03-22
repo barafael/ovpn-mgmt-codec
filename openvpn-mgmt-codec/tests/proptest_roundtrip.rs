@@ -44,7 +44,7 @@ fn arb_auth_type() -> BoxedStrategy<AuthType> {
         Just(AuthType::PrivateKey),
         Just(AuthType::HttpProxy),
         Just(AuthType::SocksProxy),
-        "CUSTOM_[a-zA-Z]{1,20}".prop_map(AuthType::Custom),
+        "CUSTOM_[a-zA-Z]{1,20}".prop_map(AuthType::Unknown),
     ]
     .boxed()
 }
@@ -55,7 +55,7 @@ fn arb_client_event() -> BoxedStrategy<ClientEvent> {
         Just(ClientEvent::Reauth),
         Just(ClientEvent::Established),
         Just(ClientEvent::Disconnect),
-        "CUSTOM_[A-Z]{1,10}".prop_map(ClientEvent::Custom),
+        "CUSTOM_[A-Z]{1,10}".prop_map(ClientEvent::Unknown),
     ]
     .boxed()
 }
@@ -67,7 +67,7 @@ fn arb_log_level() -> BoxedStrategy<LogLevel> {
         Just(LogLevel::Warning),
         Just(LogLevel::NonFatal),
         Just(LogLevel::Fatal),
-        "CUSTOM_[A-Z]{1,10}".prop_map(LogLevel::Custom),
+        "CUSTOM_[A-Z]{1,10}".prop_map(LogLevel::Unknown),
     ]
     .boxed()
 }
@@ -85,7 +85,7 @@ fn arb_openvpn_state() -> BoxedStrategy<OpenVpnState> {
         Just(OpenVpnState::Exiting),
         Just(OpenVpnState::TcpConnect),
         Just(OpenVpnState::Resolve),
-        "CUSTOM_[A-Z]{1,10}".prop_map(OpenVpnState::Custom),
+        "CUSTOM_[A-Z]{1,10}".prop_map(OpenVpnState::Unknown),
     ]
     .boxed()
 }
@@ -94,7 +94,7 @@ fn arb_transport_protocol() -> BoxedStrategy<TransportProtocol> {
     prop_oneof![
         Just(TransportProtocol::Udp),
         Just(TransportProtocol::Tcp),
-        "CUSTOM_[a-zA-Z]{1,10}".prop_map(TransportProtocol::Custom),
+        "CUSTOM_[a-zA-Z]{1,10}".prop_map(TransportProtocol::Unknown),
     ]
     .boxed()
 }
@@ -149,9 +149,11 @@ fn notification_to_wire(notif: &Notification) -> String {
             local_port,
             local_ipv6,
         } => {
+            let rport = remote_port.map(|p| p.to_string()).unwrap_or_default();
+            let lport = local_port.map(|p| p.to_string()).unwrap_or_default();
             format!(
                 ">STATE:{timestamp},{name},{description},{local_ip},\
-                 {remote_ip},{remote_port},{local_addr},{local_port},{local_ipv6}\n"
+                     {remote_ip},{rport},{local_addr},{lport},{local_ipv6}\n"
             )
         }
         Notification::ByteCount {
@@ -354,9 +356,9 @@ proptest! {
         description in safe_field(),
         local_ip in safe_field(),
         remote_ip in safe_field(),
-        remote_port in safe_field(),
+        remote_port in proptest::option::of(any::<u16>()),
         local_addr in safe_field(),
-        local_port in safe_field(),
+        local_port in proptest::option::of(any::<u16>()),
         local_ipv6 in safe_field(),
     ) {
         let notif = Notification::State {
@@ -502,7 +504,7 @@ proptest! {
     #[test]
     fn roundtrip_notif_proxy(
         index in any::<u32>(),
-        proxy_type in safe_field(),
+        proxy_type in arb_transport_protocol(),
         host in safe_field(),
     ) {
         let notif = Notification::Proxy { index, proxy_type, host };
@@ -655,12 +657,11 @@ fn arb_need_ok_response() -> BoxedStrategy<NeedOkResponse> {
 /// well-formed commands; using `adversarial_string()` exercises the
 /// encoder's sanitization defenses.
 fn arb_ovpn_command_with(s: BoxedStrategy<String>) -> BoxedStrategy<OvpnCommand> {
-    let kill =
-        prop_oneof![
-            s.clone().prop_map(KillTarget::CommonName),
-            (s.clone(), s.clone(), any::<u16>())
-                .prop_map(|(protocol, ip, port)| KillTarget::Address { protocol, ip, port }),
-        ];
+    let kill = prop_oneof![
+        s.clone().prop_map(KillTarget::CommonName),
+        (arb_transport_protocol(), s.clone(), any::<u16>())
+            .prop_map(|(protocol, ip, port)| KillTarget::Address { protocol, ip, port }),
+    ];
     let remote = prop_oneof![
         Just(RemoteAction::Accept),
         Just(RemoteAction::Skip),
@@ -827,9 +828,9 @@ fn arb_single_line_notification() -> BoxedStrategy<Notification> {
             safe_field(),
             safe_field(),
             safe_field(),
+            proptest::option::of(any::<u16>()),
             safe_field(),
-            safe_field(),
-            safe_field(),
+            proptest::option::of(any::<u16>()),
             safe_field(),
         )
             .prop_map(|(ts, name, desc, lip, rip, rport, laddr, lport, lipv6)| {
@@ -886,10 +887,12 @@ fn arb_single_line_notification() -> BoxedStrategy<Notification> {
                 protocol: pr,
             }
         }),
-        (any::<u32>(), safe_field(), safe_field()).prop_map(|(idx, pt, h)| Notification::Proxy {
-            index: idx,
-            proxy_type: pt,
-            host: h,
+        (any::<u32>(), arb_transport_protocol(), safe_field()).prop_map(|(idx, pt, h)| {
+            Notification::Proxy {
+                index: idx,
+                proxy_type: pt,
+                host: h,
+            }
         }),
         arb_password_notification().prop_map(Notification::Password),
         (any::<u64>(), safe_field(), any::<bool>()).prop_map(|(c, a, p)| {

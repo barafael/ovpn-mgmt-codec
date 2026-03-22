@@ -138,10 +138,12 @@ async fn connect_and_auth() -> (Framed<TcpStream, OvpnCodec>, bool) {
     // HOLD notification is sent only if the hold has not been released
     // yet. Probe with a short timeout — after a previous test releases
     // hold, new management clients do NOT see >HOLD.
-    let in_hold = match timeout(Duration::from_secs(2), framed.next()).await {
-        Ok(Some(Ok(OvpnMessage::Notification(Notification::Hold { .. })))) => true,
-        _ => false,
-    };
+    let in_hold = matches!(
+        timeout(Duration::from_secs(2), framed.next()).await,
+        Ok(Some(Ok(OvpnMessage::Notification(
+            Notification::Hold { .. }
+        ))))
+    );
 
     (framed, in_hold)
 }
