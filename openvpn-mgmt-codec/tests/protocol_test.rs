@@ -15,7 +15,7 @@ use openvpn_mgmt_codec::PasswordNotification;
 use openvpn_mgmt_codec::*;
 use tokio_util::codec::{Decoder, Encoder};
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// --- Helpers ---
 
 fn encode_to_string(cmd: OvpnCommand) -> String {
     let mut codec = OvpnCodec::new();
@@ -46,9 +46,9 @@ fn encode_then_decode(cmd: OvpnCommand, response: &str) -> Vec<OvpnMessage> {
     msgs
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // Connection lifecycle
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn connection_banner() {
@@ -137,9 +137,9 @@ fn reconnecting_and_exiting_states() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // Status output formats (V1, V2, V3)
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn status_v1_server_with_clients() {
@@ -208,9 +208,9 @@ fn status_v1_client_mode() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // Version and help output
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn version_response() {
@@ -241,9 +241,9 @@ fn help_response() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // Bytecount notifications
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn bytecount_client_mode() {
@@ -285,9 +285,9 @@ fn bytecount_enable_disable_roundtrip() {
     assert_eq!(encode_to_string(OvpnCommand::ByteCount(0)), "bytecount 0\n");
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // Log notifications
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn log_notifications_all_flags() {
@@ -347,9 +347,9 @@ END\n";
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // State history and streaming
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn state_history_on_all() {
@@ -382,9 +382,9 @@ fn state_stream_on_off() {
     assert!(matches!(&msgs[0], OvpnMessage::Success(s) if s.contains("OFF")));
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // CLIENT notifications — full env-var sets from the spec
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn client_connect_full_env() {
@@ -523,9 +523,9 @@ fn multiple_client_events_sequential() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // Password / auth prompts
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn password_need_auth() {
@@ -625,9 +625,9 @@ fn challenge_response_static_scrv1() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // HOLD notifications
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn hold_waiting() {
@@ -641,9 +641,9 @@ fn hold_waiting() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // ECHO notifications
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn echo_notification() {
@@ -674,9 +674,9 @@ END\n";
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // FATAL / NEED-OK / NEED-STR / RSA_SIGN / REMOTE / PROXY notifications
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn fatal_notification() {
@@ -768,9 +768,9 @@ fn proxy_notification() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // Encoder roundtrips for all command variants
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn encode_all_simple_commands() {
@@ -1017,9 +1017,9 @@ fn encode_needok_cancel() {
     assert_eq!(wire, "needok token-insertion-request cancel\n");
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // SUCCESS / ERROR responses for various commands
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn success_responses() {
@@ -1115,9 +1115,9 @@ fn error_responses() {
     assert!(matches!(&msgs[0], OvpnMessage::Error(_)));
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // Edge cases and interleaving
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn crlf_line_endings() {
@@ -1276,9 +1276,9 @@ fn pkcs11_id_count_success() {
     assert!(matches!(&msgs[0], OvpnMessage::Success(s) if s == "2"));
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // Realistic multi-command session simulation
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn full_session_sequence() {
@@ -1404,9 +1404,9 @@ fn server_mode_client_auth_session() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // Incremental / partial decode (data arriving in chunks)
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn partial_line_buffering() {
@@ -1443,9 +1443,9 @@ fn partial_client_env_block() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // New commands (Phase 2)
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn encode_load_stats() {
@@ -1500,9 +1500,9 @@ fn encode_certificate() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // Challenge-response auth commands (Phase 4)
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn encode_challenge_response_crv1() {
@@ -1532,9 +1532,9 @@ fn challenge_response_with_special_chars_in_state_id() {
     assert!(wire.contains("CRV1::abc+def/ghi=::mypin"));
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // Management password authentication (Phase 5)
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn decode_password_prompt() {
@@ -1621,15 +1621,15 @@ fn partial_multiline_response() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // Real-world test data sourced from internet (OpenVPN ecosystem)
 // Sources: openvpn/openvpn manage.c, management-notes.txt,
 //   jkroepke/openvpn-auth-oauth2, kumina/openvpn_exporter,
 //   Jamie-/openvpn-api, mysteriumnetwork/go-openvpn,
 //   tonyseek/openvpn-status, OpenVPN community docs
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 
-// ── Status format variants from real deployments ─────────────────
+// --- Status format variants from real deployments ---
 
 #[test]
 fn status_v1_server_empty_no_clients() {
@@ -1751,7 +1751,7 @@ fn status_v1_client_full_with_compression_stats() {
     }
 }
 
-// ── Version output from different OpenVPN versions ───────────────
+// --- Version output from different OpenVPN versions ---
 
 #[test]
 fn version_response_2_6_9() {
@@ -1783,7 +1783,7 @@ fn version_response_old_2_3() {
     }
 }
 
-// ── Help output from OpenVPN 2.6.9 (full command list) ───────────
+// --- Help output from OpenVPN 2.6.9 (full command list) ---
 
 #[test]
 fn help_response_2_6_9_with_newer_commands() {
@@ -1806,7 +1806,7 @@ fn help_response_2_6_9_with_newer_commands() {
     }
 }
 
-// ── State notifications: all 13 state names from manage.h ────────
+// --- State notifications: all 13 state names from manage.h ---
 
 #[test]
 fn state_all_known_names() {
@@ -1913,7 +1913,7 @@ fn state_ipv6_connection() {
     }
 }
 
-// ── Full connection lifecycle from real capture ──────────────────
+// --- Full connection lifecycle from real capture ---
 
 #[test]
 fn full_connection_lifecycle_from_capture() {
@@ -1976,7 +1976,7 @@ fn full_connection_lifecycle_from_capture() {
     }
 }
 
-// ── Password/auth: all auth types from manage.c ──────────────────
+// --- Password/auth: all auth types from manage.c ---
 
 #[test]
 fn password_need_http_proxy() {
@@ -2066,7 +2066,7 @@ fn password_custom_auth_type() {
     }
 }
 
-// ── CLIENT notifications: rich TLS env from real servers ─────────
+// --- CLIENT notifications: rich TLS env from real servers ---
 
 #[test]
 fn client_connect_tls_rich_env() {
@@ -2142,7 +2142,7 @@ fn client_cr_response_event() {
     }
 }
 
-// ── Log notifications from real servers ──────────────────────────
+// --- Log notifications from real servers ---
 
 #[test]
 fn log_history_real_server_output() {
@@ -2180,7 +2180,7 @@ fn log_with_management_cmd_echo() {
     }
 }
 
-// ── BYTECOUNT edge cases ────────────────────────────────────────
+// --- BYTECOUNT edge cases ---
 
 #[test]
 fn bytecount_zero_values() {
@@ -2237,7 +2237,7 @@ fn bytecount_cli_multiple_clients() {
     }
 }
 
-// ── SUCCESS/ERROR messages from manage.c source code ────────────
+// --- SUCCESS/ERROR messages from manage.c source code ---
 
 #[test]
 fn success_load_stats_real_format() {
@@ -2392,7 +2392,7 @@ fn error_unknown_command_full() {
     assert!(matches!(&msgs[0], OvpnMessage::Error(s) if s.contains("[foobar]")));
 }
 
-// ── FATAL notifications from real servers ─────────────────────────
+// --- FATAL notifications from real servers ---
 
 #[test]
 fn fatal_tun_tap_device() {
@@ -2426,7 +2426,7 @@ fn fatal_connection_timeout() {
     ));
 }
 
-// ── ECHO notifications ──────────────────────────────────────────
+// --- ECHO notifications ---
 
 #[test]
 fn echo_forget_passwords() {
@@ -2441,7 +2441,7 @@ fn echo_forget_passwords() {
     }
 }
 
-// ── REMOTE notification with different protocols ─────────────────
+// --- REMOTE notification with different protocols ---
 
 #[test]
 fn remote_notification_tcp() {
@@ -2461,7 +2461,7 @@ fn remote_notification_tcp() {
     }
 }
 
-// ── PROXY notification variants ─────────────────────────────────
+// --- PROXY notification variants ---
 
 #[test]
 fn proxy_notification_tcp() {
@@ -2481,7 +2481,7 @@ fn proxy_notification_tcp() {
     }
 }
 
-// ── Unrecognized / forward-compat notification types ────────────
+// --- Unrecognized / forward-compat notification types ---
 
 #[test]
 fn unrecognized_notification_falls_back_to_simple() {
@@ -2551,7 +2551,7 @@ fn infomsg_cr_text() {
     }
 }
 
-// ── Encoder tests for commands found in newer protocol versions ──
+// --- Encoder tests for commands found in newer protocol versions ---
 
 #[test]
 fn encode_remote_modify() {
@@ -2652,7 +2652,7 @@ fn encode_rsa_sig_real_base64() {
     assert!(wire.contains("MIIBojCCA"));
 }
 
-// ── HOLD edge cases ─────────────────────────────────────────────
+// --- HOLD edge cases ---
 
 #[test]
 fn hold_waiting_with_seconds() {
@@ -2673,7 +2673,7 @@ fn hold_query_returns_zero() {
     assert!(matches!(&msgs[0], OvpnMessage::Success(s) if s == "hold=0"));
 }
 
-// ── Complex session simulations from real usage patterns ─────────
+// --- Complex session simulations from real usage patterns ---
 
 #[test]
 fn server_mode_deny_then_accept_session() {
@@ -2902,7 +2902,7 @@ fn notification_storm_between_commands() {
     ));
 }
 
-// ── Edge cases: CRLF in various positions ────────────────────────
+// --- Edge cases: CRLF in various positions ---
 
 #[test]
 fn crlf_in_multiline_response() {
@@ -2935,7 +2935,7 @@ fn crlf_in_client_notification() {
     }
 }
 
-// ── Incremental delivery edge cases ─────────────────────────────
+// --- Incremental delivery edge cases ---
 
 #[test]
 fn partial_state_notification_split_at_comma() {
@@ -3000,7 +3000,7 @@ fn partial_success_split_mid_word() {
     assert!(matches!(msg, OvpnMessage::Success(s) if s == "pid=99999"));
 }
 
-// ── Multiple interleaved notifications during multiline ─────────
+// --- Multiple interleaved notifications during multiline ---
 
 #[test]
 fn multiple_notifications_interleaved_in_status() {
@@ -3037,7 +3037,7 @@ fn multiple_notifications_interleaved_in_status() {
     }
 }
 
-// ── Encoding edge cases ─────────────────────────────────────────
+// --- Encoding edge cases ---
 
 #[test]
 fn encode_password_with_unicode() {
@@ -3113,7 +3113,7 @@ fn encode_certificate_real_pem() {
     assert!(wire.ends_with("END\n"));
 }
 
-// ── PKCS#11 response variations ─────────────────────────────────
+// --- PKCS#11 response variations ---
 
 #[test]
 fn pkcs11_id_count_from_notification() {
@@ -3139,9 +3139,9 @@ fn pkcs11_id_count_zero() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 // Decoder graceful degradation on malformed notifications
-// ═══════════════════════════════════════════════════════════════════════
+// ---  ---
 //
 // Every `parse_*` function returns `Option<Notification>`.  When the
 // wire payload is truncated, garbled, or from a future OpenVPN version,
@@ -3336,7 +3336,7 @@ fn unrecognized_password_subformat_falls_back_to_simple() {
     }
 }
 
-// ── CLIENT notification edge cases ──────────────────────────────────
+// --- CLIENT notification edge cases ---
 
 #[test]
 fn client_notification_no_comma_in_payload() {

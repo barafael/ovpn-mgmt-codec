@@ -8,7 +8,7 @@ use bytes::BytesMut;
 use openvpn_mgmt_codec::*;
 use tokio_util::codec::{Decoder, Encoder};
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// --- Helpers ---
 
 fn encode_bytes(cmd: OvpnCommand) -> BytesMut {
     let mut codec = OvpnCodec::new();
@@ -51,9 +51,9 @@ fn self_decode(cmd: OvpnCommand, is_multiline: bool) -> Vec<OvpnMessage> {
     msgs
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Password with special characters
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn password_with_backslashes_and_quotes() {
@@ -104,9 +104,9 @@ fn password_with_spaces() {
     assert_eq!(wire.lines().count(), 1);
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Username with injection attempts
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn username_with_null_bytes() {
@@ -127,9 +127,9 @@ fn username_with_cr_lf() {
     assert_eq!(wire.lines().count(), 1);
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Custom auth type edge cases
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn custom_auth_type_with_spaces() {
@@ -151,9 +151,9 @@ fn custom_auth_type_with_quotes() {
     assert_eq!(wire.lines().count(), 1);
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Multi-line block commands with adversarial bodies
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn client_auth_config_line_containing_end() {
@@ -220,9 +220,9 @@ fn rsa_sig_empty_body() {
     assert_eq!(wire.lines().count(), 2);
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Challenge-response with special characters
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn challenge_response_with_colons_in_state_id() {
@@ -245,9 +245,9 @@ fn static_challenge_response_with_equals_in_b64() {
     assert!(wire.contains("cGFzcw=="));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Client-deny with adversarial reason strings
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn client_deny_reason_with_quotes() {
@@ -272,9 +272,9 @@ fn client_deny_without_client_reason() {
     assert!(wire.starts_with("client-deny 1 0 "));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Strict mode rejects
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn strict_mode_rejects_newline_in_password() {
@@ -335,9 +335,9 @@ fn strict_mode_accepts_clean_inputs() {
     assert!(!buf.is_empty());
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Roundtrip integrity: encode → server SUCCESS → decode
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn roundtrip_sanitized_password_produces_valid_success() {
@@ -403,9 +403,9 @@ fn roundtrip_cr_response() {
     assert!(matches!(msg, OvpnMessage::Success(_)));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Self-decode: encode then decode own wire output
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn self_decode_simple_commands_produce_success_or_unrecognized() {
@@ -452,9 +452,9 @@ fn self_decode_multiline_command_body_becomes_multiline_response() {
     assert!(!msgs.is_empty());
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Very long inputs
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn very_long_password_encodes_successfully() {

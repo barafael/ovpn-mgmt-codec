@@ -55,7 +55,7 @@ const MGMT_PASSWORD: &str = "test-password";
 /// How long to wait for a message before giving up.
 const MSG_TIMEOUT: Duration = Duration::from_secs(10);
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// --- Helpers ---
 
 /// Receive the next message with a timeout so tests fail fast instead
 /// of hanging forever when the management interface is unresponsive.
@@ -148,9 +148,9 @@ async fn connect_and_auth() -> (Framed<TcpStream, OvpnCodec>, bool) {
     (framed, in_hold)
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Connection & Authentication
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[tokio::test]
 #[traced_test]
@@ -158,9 +158,9 @@ async fn connect_and_authenticate() {
     let (_framed, _in_hold) = connect_and_auth().await;
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Informational commands
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[tokio::test]
 #[traced_test]
@@ -208,9 +208,9 @@ async fn pid_returns_valid_process_id() {
     assert!(pid > 0, "PID should be positive");
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // State queries
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[tokio::test]
 #[traced_test]
@@ -237,9 +237,9 @@ async fn hold_query_parses_correctly() {
     assert_eq!(held, in_hold, "hold query should match observed hold state");
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Status (no tunnel, so mostly empty)
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[tokio::test]
 #[traced_test]
@@ -268,9 +268,9 @@ async fn status_v3_returns_multiline() {
     assert!(!lines.is_empty(), "status 3 should return lines");
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Real-time stream toggling
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[tokio::test]
 #[traced_test]
@@ -313,9 +313,9 @@ async fn bytecount_toggle() {
     send_ok(&mut framed, OvpnCommand::ByteCount(0), "").await;
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Hold release & signal
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[tokio::test]
 #[traced_test]
@@ -338,9 +338,9 @@ async fn hold_release_triggers_state_notification() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Log stream with history
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[tokio::test]
 #[traced_test]
@@ -351,9 +351,9 @@ async fn log_all_returns_multiline_history() {
     assert!(!lines.is_empty(), "log all should return log history");
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Error handling — unknown / invalid commands
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[tokio::test]
 #[traced_test]
@@ -372,9 +372,9 @@ async fn unknown_raw_command_returns_error() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Multiple commands in sequence (stateful codec correctness)
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[tokio::test]
 #[traced_test]
@@ -402,9 +402,9 @@ async fn sequential_commands_maintain_codec_state() {
     assert!(matches!(msg, OvpnMessage::Success(_)));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Exit / Quit
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[tokio::test]
 #[traced_test]

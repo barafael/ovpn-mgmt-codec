@@ -271,7 +271,7 @@ impl fmt::Debug for RedactedEnv<'_> {
 mod tests {
     use super::*;
     use crate::transport_protocol::TransportProtocol;
-    // ── Debug redaction ──────────────────────────────────────────
+    // --- Debug redaction ---
 
     #[test]
     fn debug_redacts_password_env_key() {
@@ -308,7 +308,7 @@ mod tests {
         assert!(dbg.contains("10.0.0.1"));
     }
 
-    // ── PasswordNotification variants ────────────────────────────
+    // --- PasswordNotification variants ---
 
     #[test]
     fn password_notification_debug_redacts_token() {
@@ -382,7 +382,7 @@ mod tests {
         }
     }
 
-    // ── Notification Debug output for each variant ───────────────
+    // --- Notification Debug output for each variant ---
 
     #[test]
     fn debug_state_notification() {
@@ -516,7 +516,7 @@ mod tests {
         assert!(dbg.contains("true"));
     }
 
-    // ── OvpnMessage variants ─────────────────────────────────────
+    // --- OvpnMessage variants ---
 
     #[test]
     fn ovpn_message_eq() {

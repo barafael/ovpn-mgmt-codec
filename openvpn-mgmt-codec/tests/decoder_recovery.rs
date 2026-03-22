@@ -8,15 +8,15 @@ use bytes::BytesMut;
 use openvpn_mgmt_codec::*;
 use tokio_util::codec::{Decoder, Encoder};
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// --- Helpers ---
 
 fn codec() -> OvpnCodec {
     OvpnCodec::new()
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // UTF-8 error recovery
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn utf8_error_followed_by_valid_success() {
@@ -108,9 +108,9 @@ fn multiple_utf8_errors_then_recovery() {
     assert!(matches!(msg, OvpnMessage::Success(s) if s == "finally"));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Accumulation limit error recovery
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn multiline_limit_error_leaves_multi_line_buf_active() {
@@ -187,9 +187,9 @@ fn client_env_limit_error_then_next_notification_works() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Unrecognized line recovery
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn unrecognized_line_does_not_break_subsequent_decoding() {
@@ -241,9 +241,9 @@ fn error_response_does_not_break_subsequent_decoding() {
     assert!(matches!(msg, OvpnMessage::Success(_)));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Partial buffer recovery
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn partial_line_then_complete_line() {
@@ -293,9 +293,9 @@ fn partial_client_notification_then_complete() {
     ));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Stress: alternating errors and valid messages
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn alternating_utf8_errors_and_valid_messages() {

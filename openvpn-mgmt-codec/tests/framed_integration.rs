@@ -10,7 +10,7 @@ use openvpn_mgmt_codec::*;
 use tokio::io::{AsyncWriteExt, duplex};
 use tokio_util::codec::Framed;
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// --- Helpers ---
 
 /// Create a Framed codec pair over a duplex stream.
 /// Returns (framed_client, server_write_half).
@@ -23,9 +23,9 @@ fn setup() -> (
     (Framed::new(client, OvpnCodec::new()), server)
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Basic Framed round-trip
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[tokio::test]
 async fn framed_encode_pid_and_decode_success() {

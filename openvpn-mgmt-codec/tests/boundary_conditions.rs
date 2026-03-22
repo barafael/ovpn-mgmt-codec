@@ -6,7 +6,7 @@ use openvpn_mgmt_codec::stream::{ManagementEvent, classify};
 use openvpn_mgmt_codec::*;
 use tokio_util::codec::{Decoder, Encoder};
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// --- Helpers ---
 
 fn decode_all(codec: &mut OvpnCodec, input: &str) -> Vec<OvpnMessage> {
     let mut buf = BytesMut::from(input);
@@ -28,9 +28,9 @@ fn try_decode_all(codec: &mut OvpnCodec, input: &str) -> Result<Vec<OvpnMessage>
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Accumulation limit boundary conditions
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn multiline_limit_exact_boundary_succeeds() {
@@ -169,9 +169,9 @@ fn empty_multiline_response() {
     assert!(matches!(&msgs[0], OvpnMessage::MultiLine(lines) if lines.is_empty()));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // FromStr / Display edge cases (valid per spec)
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn status_format_display_roundtrip_all() {
@@ -311,9 +311,9 @@ fn ovpn_command_from_str_unknown_falls_to_raw() {
     assert!(matches!(cmd, OvpnCommand::Raw(_)));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // CRLF line ending handling
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn crlf_success_response() {
@@ -395,9 +395,9 @@ fn mixed_lf_and_crlf_in_same_stream() {
     assert_eq!(msgs.len(), 3);
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // classify exhaustiveness
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn classify_success() {

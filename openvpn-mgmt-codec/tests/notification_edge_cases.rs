@@ -7,7 +7,7 @@ use bytes::BytesMut;
 use openvpn_mgmt_codec::*;
 use tokio_util::codec::Decoder;
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// --- Helpers ---
 
 fn decode_all(input: &str) -> Vec<OvpnMessage> {
     let mut codec = OvpnCodec::new();
@@ -39,9 +39,9 @@ fn expect_simple(input: &str) -> (String, String) {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // STATE notification edge cases
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn state_minimal_fields() {
@@ -118,9 +118,9 @@ fn state_unknown_state_name() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // BYTECOUNT edge cases
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn bytecount_zero_values() {
@@ -189,9 +189,9 @@ fn bytecount_cli_missing_field_falls_back() {
     assert_eq!(kind, "BYTECOUNT_CLI");
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // LOG edge cases
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn log_with_commas_in_message() {
@@ -236,9 +236,9 @@ fn log_missing_fields_falls_back() {
     assert_eq!(kind, "LOG");
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // ECHO edge cases
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn echo_with_commas() {
@@ -260,9 +260,9 @@ fn echo_empty_param() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // PASSWORD notification edge cases
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn password_need_auth_all_known_types() {
@@ -427,9 +427,9 @@ fn password_need_with_unknown_suffix_falls_back() {
     assert_eq!(kind, "PASSWORD");
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // REMOTE / PROXY edge cases
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn remote_valid() {
@@ -461,9 +461,9 @@ fn proxy_non_numeric_index_falls_back() {
     assert_eq!(kind, "PROXY");
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // NEED-OK / NEED-STR edge cases
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn need_ok_valid() {
@@ -499,9 +499,9 @@ fn need_str_valid() {
     ));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // PKCS11 edge cases
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn pkcs11_id_count_valid() {
@@ -544,9 +544,9 @@ fn pkcs11_id_entry_malformed_falls_back() {
     ));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Miscellaneous notification edge cases
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn hold_preserves_full_text() {

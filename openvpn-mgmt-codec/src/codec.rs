@@ -224,7 +224,7 @@ fn check_accumulation_limit(
     Ok(())
 }
 
-// ── Encoder ───────────────────────────────────────────────────────
+// --- Encoder ---
 
 impl Encoder<OvpnCommand> for OvpnCodec {
     type Error = io::Error;
@@ -246,7 +246,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
         let mode = self.encoder_mode;
 
         match item {
-            // ── Informational ────────────────────────────────────
+            // --- Informational ---
             OvpnCommand::Status(StatusFormat::V1) => write_line(dst, "status"),
             OvpnCommand::Status(ref fmt) => write_line(dst, &format!("status {fmt}")),
             OvpnCommand::State => write_line(dst, "state"),
@@ -260,12 +260,12 @@ impl Encoder<OvpnCommand> for OvpnCodec {
             OvpnCommand::Mute(Some(n)) => write_line(dst, &format!("mute {n}")),
             OvpnCommand::Mute(None) => write_line(dst, "mute"),
 
-            // ── Real-time notification control ───────────────────
+            // --- Real-time notification control ---
             OvpnCommand::Log(ref m) => write_line(dst, &format!("log {m}")),
             OvpnCommand::Echo(ref m) => write_line(dst, &format!("echo {m}")),
             OvpnCommand::ByteCount(n) => write_line(dst, &format!("bytecount {n}")),
 
-            // ── Connection control ───────────────────────────────
+            // --- Connection control ---
             OvpnCommand::Signal(sig) => write_line(dst, &format!("signal {sig}")),
             OvpnCommand::Kill(KillTarget::CommonName(ref cn)) => {
                 write_line(dst, &format!("kill {}", wire_safe(cn, "kill CN", mode)?));
@@ -288,7 +288,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
             OvpnCommand::HoldOff => write_line(dst, "hold off"),
             OvpnCommand::HoldRelease => write_line(dst, "hold release"),
 
-            // ── Authentication ───────────────────────────────────
+            // --- Authentication ---
             //
             // Both username and password values MUST be properly escaped.
             // The auth type is always double-quoted on the wire.
@@ -324,7 +324,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
             }
             OvpnCommand::ForgetPasswords => write_line(dst, "forget-passwords"),
 
-            // ── Challenge-response ──────────────────────────────
+            // --- Challenge-response ---
             OvpnCommand::ChallengeResponse {
                 ref state_id,
                 ref response,
@@ -346,7 +346,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 write_line(dst, &format!("password \"Auth\" {escaped}"));
             }
 
-            // ── Interactive prompts ──────────────────────────────
+            // --- Interactive prompts ---
             OvpnCommand::NeedOk { ref name, response } => {
                 write_line(
                     dst,
@@ -370,11 +370,11 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 );
             }
 
-            // ── PKCS#11 ─────────────────────────────────────────
+            // --- PKCS#11 ---
             OvpnCommand::Pkcs11IdCount => write_line(dst, "pkcs11-id-count"),
             OvpnCommand::Pkcs11IdGet(idx) => write_line(dst, &format!("pkcs11-id-get {idx}")),
 
-            // ── External key (multi-line command) ────────────────
+            // --- External key (multi-line command) ---
             //
             // Wire format:
             //   rsa-sig
@@ -385,21 +385,21 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 write_block(dst, "rsa-sig", base64_lines, mode)?;
             }
 
-            // ── External key signature (pk-sig) ─────────────────
+            // --- External key signature (pk-sig) ---
             OvpnCommand::PkSig { ref base64_lines } => {
                 write_block(dst, "pk-sig", base64_lines, mode)?;
             }
 
-            // ── ENV filter ──────────────────────────────────────
+            // --- ENV filter ---
             OvpnCommand::EnvFilter(level) => write_line(dst, &format!("env-filter {level}")),
 
-            // ── Remote entry queries ────────────────────────────
+            // --- Remote entry queries ---
             OvpnCommand::RemoteEntryCount => write_line(dst, "remote-entry-count"),
             OvpnCommand::RemoteEntryGet(ref range) => {
                 write_line(dst, &format!("remote-entry-get {range}"));
             }
 
-            // ── Push updates ────────────────────────────────────
+            // --- Push updates ---
             OvpnCommand::PushUpdateBroad { ref options } => {
                 let opts =
                     quote_and_escape(&wire_safe(options, "push-update-broad options", mode)?);
@@ -410,7 +410,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 write_line(dst, &format!("push-update-cid {cid} {opts}"));
             }
 
-            // ── Client management ────────────────────────────────
+            // --- Client management ---
             //
             // client-auth is a multi-line command:
             //   client-auth {CID} {KID}
@@ -457,10 +457,10 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 None => write_line(dst, &format!("client-kill {cid}")),
             },
 
-            // ── Server statistics ─────────────────────────────────
+            // --- Server statistics ---
             OvpnCommand::LoadStats => write_line(dst, "load-stats"),
 
-            // ── Extended client management ───────────────────────
+            // --- Extended client management ---
             //
             // TODO: warn when `extra` exceeds 245 characters — real-world
             // limit discovered by jkroepke/openvpn-auth-oauth2 (used for
@@ -489,12 +489,12 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 );
             }
 
-            // ── External certificate ─────────────────────────────
+            // --- External certificate ---
             OvpnCommand::Certificate { ref pem_lines } => {
                 write_block(dst, "certificate", pem_lines, mode)?;
             }
 
-            // ── Remote/Proxy ─────────────────────────────────────
+            // --- Remote/Proxy ---
             OvpnCommand::Remote(RemoteAction::Accept) => write_line(dst, "remote ACCEPT"),
             OvpnCommand::Remote(RemoteAction::Skip) => write_line(dst, "remote SKIP"),
             OvpnCommand::Remote(RemoteAction::Modify { ref host, port }) => {
@@ -531,18 +531,18 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 );
             }
 
-            // ── Management interface auth ─────────────────────────
+            // --- Management interface auth ---
             // Bare line, no quoting — the management password protocol
             // does not use the config-file lexer.
             OvpnCommand::ManagementPassword(ref pw) => {
                 write_line(dst, &wire_safe(pw.expose(), "management password", mode)?);
             }
 
-            // ── Lifecycle ────────────────────────────────────────
+            // --- Lifecycle ---
             OvpnCommand::Exit => write_line(dst, "exit"),
             OvpnCommand::Quit => write_line(dst, "quit"),
 
-            // ── Escape hatch ─────────────────────────────────────
+            // --- Escape hatch ---
             OvpnCommand::Raw(ref cmd) | OvpnCommand::RawMultiLine(ref cmd) => {
                 write_line(dst, &wire_safe(cmd, "raw command", mode)?);
             }
@@ -598,7 +598,7 @@ fn write_block(
     Ok(())
 }
 
-// ── Decoder ───────────────────────────────────────────────────────
+// --- Decoder ---
 
 impl Decoder for OvpnCodec {
     type Item = OvpnMessage;
@@ -662,7 +662,7 @@ impl Decoder for OvpnCodec {
                 continue;
             }
 
-            // ── Phase 1: Multi-line >CLIENT: accumulation ────────
+            // --- Phase 1: Multi-line >CLIENT: accumulation ---
             //
             // When we're accumulating a CLIENT notification, >CLIENT:ENV
             // lines belong to it. The block terminates with >CLIENT:ENV,END.
@@ -700,7 +700,7 @@ impl Decoder for OvpnCodec {
             // Not a >CLIENT:ENV line — fall through to normal processing.
             // This handles interleaved notifications or unexpected output.
 
-            // ── Phase 2: Multi-line command response accumulation ─
+            // --- Phase 2: Multi-line command response accumulation ---
             if let Some(ref mut buf) = self.multi_line_buf {
                 if line == "END" {
                     let lines = self.multi_line_buf.take().expect("guarded by if-let");
@@ -728,7 +728,7 @@ impl Decoder for OvpnCodec {
                 continue; // Next line.
             }
 
-            // ── Phase 3: Self-describing lines ───────────────────
+            // --- Phase 3: Self-describing lines ---
             //
             // SUCCESS: and ERROR: are unambiguous. We match on "SUCCESS:"
             // without requiring a trailing space — the doc shows
@@ -758,7 +758,7 @@ impl Decoder for OvpnCodec {
                 continue;
             }
 
-            // ── Phase 4: Ambiguous lines — use command tracking ──
+            // --- Phase 4: Ambiguous lines — use command tracking ---
             //
             // The line is not self-describing (no SUCCESS/ERROR/> prefix).
             // Use the expected-response state from the last encoded command
@@ -901,7 +901,7 @@ impl OvpnCodec {
     }
 }
 
-// ── Notification parsers ──────────────────────────────────────────
+// --- Notification parsers ---
 //
 // Each returns `Option<Notification>`. `None` means "could not parse,
 // fall back to Simple". This is intentional — the protocol varies
@@ -1216,7 +1216,7 @@ mod tests {
         msgs
     }
 
-    // ── Encoder tests ────────────────────────────────────────────
+    // --- Encoder tests ---
 
     #[test]
     fn encode_status_v1() {
@@ -1449,7 +1449,7 @@ mod tests {
         );
     }
 
-    // ── Decoder tests ────────────────────────────────────────────
+    // --- Decoder tests ---
 
     #[test]
     fn decode_success() {
@@ -1690,7 +1690,7 @@ mod tests {
         ));
     }
 
-    // ── RawMultiLine tests ──────────────────────────────────────
+    // --- RawMultiLine tests ---
 
     #[test]
     fn encode_raw_multiline() {
@@ -1731,7 +1731,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── Sequential encode/decode assertion tests ────────────────
+    // --- Sequential encode/decode assertion tests ---
 
     #[test]
     #[should_panic(expected = "mid-accumulation")]
@@ -1761,7 +1761,7 @@ mod tests {
         codec.encode(OvpnCommand::Pid, &mut buf).unwrap();
     }
 
-    // ── Accumulation limit tests ────────────────────────────────
+    // --- Accumulation limit tests ---
 
     #[test]
     fn unlimited_accumulation_default() {
@@ -1859,7 +1859,7 @@ mod tests {
         );
     }
 
-    // ── UTF-8 error state reset tests ───────────────────────────
+    // --- UTF-8 error state reset tests ---
 
     #[test]
     fn utf8_error_resets_multiline_state() {

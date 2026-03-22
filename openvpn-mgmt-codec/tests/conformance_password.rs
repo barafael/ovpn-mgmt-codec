@@ -36,7 +36,7 @@ const CLIENT_PASSWORD_ADDR: &str = "127.0.0.1:7508";
 #[tokio::test]
 #[traced_test]
 async fn password_need_auth() {
-    // ── Set up server: connect (with retry), release hold, auto-approve ──
+    // --- Set up server: connect (with retry), release hold, auto-approve ---
     let server_stream = timeout(Duration::from_secs(30), async {
         loop {
             match TcpStream::connect(SERVER_ADDR).await {
@@ -96,7 +96,7 @@ async fn password_need_auth() {
         }
     });
 
-    // ── Set up client: connect, release hold, wait for >PASSWORD: ───
+    // --- Set up client: connect, release hold, wait for >PASSWORD: ---
     let mut framed = connect_and_auth(CLIENT_PASSWORD_ADDR).await;
     send_ok(&mut framed, OvpnCommand::StateStream(StreamMode::On), "").await;
     send_ok(&mut framed, OvpnCommand::HoldRelease, "hold release").await;

@@ -10,7 +10,7 @@ use bytes::BytesMut;
 use openvpn_mgmt_codec::*;
 use tokio_util::codec::{Decoder, Encoder};
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// --- Helpers ---
 
 fn decode_all(input: &str) -> Vec<OvpnMessage> {
     let mut codec = OvpnCodec::new();
@@ -36,13 +36,13 @@ fn try_encode_strict(cmd: OvpnCommand) -> Result<String, std::io::Error> {
     Ok(String::from_utf8(buf.to_vec()).unwrap())
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Variable-length >STATE: fields with trailing empty commas
 // Source: real forum logs, OpenVPN 2.4+
 //         >STATE:1676768325,WAIT,,,,,,
 // See also: https://github.com/OpenVPN/openvpn/blob/master/src/openvpn/manage.h
 //           (state field definitions evolved across versions)
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn state_all_fields_empty_trailing_commas() {
@@ -117,11 +117,11 @@ fn state_reconnecting_with_reason() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // String timestamp instead of u64 — parse_state must not panic
 // Source: https://github.com/tonyseek/openvpn-status/issues/24
 //         Timestamp format changed between OpenVPN versions.
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn state_string_timestamp_degrades_to_simple() {
@@ -138,11 +138,11 @@ fn state_string_timestamp_degrades_to_simple() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // UNDEF as Common Name in CLIENT ENV
 // Source: https://community.openvpn.net/openvpn/ticket/160
 //         https://github.com/jkroepke/openvpn-auth-oauth2/issues/139
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn client_env_undef_common_name() {
@@ -180,10 +180,10 @@ fn client_env_missing_common_name_entirely() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // ENV values containing '=' signs
 // Source: inherent protocol design, X.509 DNs contain '='
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn client_env_value_with_multiple_equals() {
@@ -223,11 +223,11 @@ fn client_env_key_with_no_equals() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Trailing \n\0 in control messages
 // Source: https://github.com/OpenVPN/openvpn/issues/645
 //         Real 2FA clients (OpenVPN Connect v3.5.1) append \n\0.
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn decoder_handles_null_byte_in_notification() {
@@ -246,12 +246,12 @@ fn decoder_handles_null_byte_in_success() {
     assert!(matches!(&msgs[0], OvpnMessage::Success(s) if s.contains("pid=1234")));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // CRLF in base64 static challenge response
 // Source: https://github.com/OpenVPN/openvpn-gui/issues/317
 //         Windows CryptBinaryToString inserts \r\n every 76 chars
 //         by default, breaking the line-oriented protocol.
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn static_challenge_response_crlf_in_base64_stripped() {
@@ -288,12 +288,12 @@ fn challenge_response_crlf_in_state_id_stripped() {
     assert!(wire.contains("abcdef"), "state_id CRLF not stripped");
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Double-escaping prevention
 // Source: https://github.com/OpenVPN/openvpn-gui/issues/351
 //         GUI escaped password THEN base64-encoded it, corrupting
 //         the payload.
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn static_challenge_no_double_escape_of_base64() {
@@ -311,11 +311,11 @@ fn static_challenge_no_double_escape_of_base64() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Unknown / future notification types degrade to Simple
 // Source: protocol evolution — new notification types added regularly
 //         e.g. >INFOMSG:, >PK_SIGN:, >NOTIFY:, >UPDOWN:
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn unknown_notification_type_degrades_to_simple() {
@@ -356,10 +356,10 @@ fn pk_sign_with_algorithm_degrades_to_simple() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Malformed notification (no colon after >)
 // Source: defensive — could come from a buggy or hostile server
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn notification_with_no_colon_becomes_unrecognized() {
@@ -374,10 +374,10 @@ fn notification_with_no_colon_becomes_unrecognized() {
     ));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // CLIENT notification with unexpected event type
 // Source: protocol evolution — new event types added (CR_RESPONSE etc.)
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn client_unknown_event_type_still_accumulates_env() {
@@ -405,12 +405,12 @@ fn client_unknown_event_type_still_accumulates_env() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Empty lines from server
 // Source: defensive — TCP connection drops and reconnects can produce
 //         empty lines; also observed in https://github.com/OpenVPN/openvpn/pull/46
 //         where man_read buffer corruption produced spurious empty lines.
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn empty_line_is_silently_skipped() {
@@ -439,12 +439,12 @@ fn blank_line_between_notifications_skipped() {
     ));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Partial / incomplete data (connection dropped mid-line)
 // Source: inherent to TCP stream framing — tokio-util codec contract
 //         requires returning Ok(None) when insufficient data is
 //         available.
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn incomplete_line_returns_none_not_error() {
@@ -480,11 +480,11 @@ fn incomplete_client_env_block_buffers_correctly() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Invalid UTF-8 from server (binary garbage)
 // Source: https://nvd.nist.gov/vuln/detail/CVE-2024-5594
 //         Unsanitized control chars in PUSH_REPLY (fixed in 2.6.11).
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn invalid_utf8_returns_error_not_panic() {
@@ -495,10 +495,10 @@ fn invalid_utf8_returns_error_not_panic() {
     assert!(result.is_err(), "expected error for invalid UTF-8, got Ok");
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // BYTECOUNT with huge values (>2^32)
 // Source: long-running VPN sessions can accumulate terabytes
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn bytecount_large_u64_values() {
@@ -516,12 +516,12 @@ fn bytecount_large_u64_values() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // PASSWORD notification edge cases
 // Source: https://github.com/OpenVPN/openvpn/blob/master/src/openvpn/manage.c
 //         management_auth_token() emits >PASSWORD:Auth-Token:{token}
 //         management_up_down() / man_password_verify() emit Verification Failed
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn password_auth_token_parsed() {
@@ -553,12 +553,12 @@ fn password_verification_failed_custom_type() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Very long lines — stress test for buffer handling
 // Source: defensive — long-running VPN servers with many clients can
 //         produce STATUS responses with very long lines, and X.509
 //         Distinguished Names can be hundreds of bytes.
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn decoder_handles_very_long_notification_line() {
@@ -595,7 +595,7 @@ fn encoder_handles_very_long_password() {
     assert!(wire.contains(&long_pass));
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // >CLIENT:CR_RESPONSE — challenge-response notification (OpenVPN 2.6+)
 //
 // Wire format (from manage.c `management_notify_client_cr_response`):
@@ -631,7 +631,7 @@ fn encoder_handles_very_long_password() {
 //     (v3 patch by Arne Schwabe, May 2021)
 //   - https://github.com/jkroepke/openvpn-auth-oauth2
 //     (real-world CR_RESPONSE consumer)
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn client_cr_response_with_full_env() {
@@ -674,13 +674,13 @@ fn client_cr_response_with_full_env() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // STATUS v2/v3 interleaving with notifications
 // Source: inherent to the protocol — OpenVPN emits real-time
 //         notifications at any time, even mid-STATUS response.
 //         The existing status_interleaved.txt covers v1; these
 //         tests verify the same property for v2 and v3 formats.
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn status_v2_interleaved_with_notification() {
@@ -763,12 +763,12 @@ fn status_v3_interleaved_with_notification() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // >PKCS11ID-ENTRY with realistic PKCS#11 data
 // Source: OpenVPN management-notes.txt, section on pkcs11-id-get.
 //         Real PKCS#11 tokens use hex-encoded serial numbers as IDs
 //         and DER-encoded certificate blobs in base64.
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn pkcs11id_entry_with_realistic_token_data() {
@@ -798,12 +798,12 @@ fn pkcs11id_entry_with_realistic_token_data() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // >BYTECOUNT_CLI — per-client byte count in server mode
 // Source: OpenVPN management-notes.txt, bytecount command.
 //         Server mode emits >BYTECOUNT_CLI:{cid},{bytes_in},{bytes_out}
 //         for each client at the configured interval.
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn bytecount_cli_realistic_server_data() {
@@ -860,9 +860,9 @@ fn bytecount_cli_realistic_server_data() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // EncoderMode::Strict — CRLF in base64 and state_id rejected
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn strict_static_challenge_response_crlf_in_base64_rejected() {

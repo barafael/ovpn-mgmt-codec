@@ -32,7 +32,7 @@ use tracing_test::traced_test;
 
 const SERVER_ADDR: &str = "127.0.0.1:7506";
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// --- Helpers ---
 
 /// Send a status query and return the multi-line response.
 async fn query_status(
@@ -99,7 +99,7 @@ impl Drop for ChildGuard {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 /// Exercises the entire server-mode management flow in one connection:
 ///
@@ -123,17 +123,17 @@ impl Drop for ChildGuard {
 #[tokio::test]
 #[traced_test]
 async fn server_mode_lifecycle() {
-    // ── Connect & authenticate ──────────────────────────────────────
+    // --- Connect & authenticate ---
     let mut framed = connect_and_auth(SERVER_ADDR).await;
     eprintln!("=== authenticated, in hold mode ===");
 
-    // ── Enable notifications & release hold ─────────────────────────
+    // --- Enable notifications & release hold ---
     send_ok(&mut framed, OvpnCommand::StateStream(StreamMode::On), "").await;
     send_ok(&mut framed, OvpnCommand::ByteCount(2), "").await;
     send_ok(&mut framed, OvpnCommand::HoldRelease, "hold release").await;
     eprintln!("=== hold released, waiting for client ===");
 
-    // ── Wait for CLIENT:CONNECT & verify ENV keys ───────────────────
+    // --- Wait for CLIENT:CONNECT & verify ENV keys ---
     let (cid, kid, env) = wait_for_client_connect(&mut framed).await;
     eprintln!(
         "=== CLIENT:CONNECT cid={cid} kid={kid} env_keys={} ===",
@@ -152,7 +152,7 @@ async fn server_mode_lifecycle() {
         "ENV should contain an IP-related key, got keys: {keys:?}",
     );
 
-    // ── Approve with client-auth (multi-line config push) ───────────
+    // --- Approve with client-auth (multi-line config push) ---
     send_ok(
         &mut framed,
         OvpnCommand::ClientAuth {
@@ -167,7 +167,7 @@ async fn server_mode_lifecycle() {
     )
     .await;
 
-    // ── Wait for CLIENT:ESTABLISHED ─────────────────────────────────
+    // --- Wait for CLIENT:ESTABLISHED ---
     let established_cid = wait_for_client_event(
         &mut framed,
         ClientEvent::Established,
@@ -177,7 +177,7 @@ async fn server_mode_lifecycle() {
     assert_eq!(established_cid, cid);
     eprintln!("=== CLIENT:ESTABLISHED ===");
 
-    // ── Status with real client data ────────────────────────────────
+    // --- Status with real client data ---
     let v1 = query_status(&mut framed, StatusFormat::V1).await;
     assert!(
         v1.iter().any(|l| l.contains("10.8.0")),
@@ -196,7 +196,7 @@ async fn server_mode_lifecycle() {
         "status 3 should contain CLIENT_LIST, got {v3:?}",
     );
 
-    // ── Load-stats ──────────────────────────────────────────────────
+    // --- Load-stats ---
     framed.send(OvpnCommand::LoadStats).await.unwrap();
     let msg = recv_response(&mut framed).await;
     let payload = match msg {
@@ -212,7 +212,7 @@ async fn server_mode_lifecycle() {
     );
     eprintln!("=== load-stats: {stats:?} ===");
 
-    // ── Bytecount notification ──────────────────────────────────────
+    // --- Bytecount notification ---
     timeout(Duration::from_secs(10), async {
         loop {
             let msg = recv_raw(&mut framed).await;
@@ -228,7 +228,7 @@ async fn server_mode_lifecycle() {
     .await
     .expect("expected bytecount notification within 10s");
 
-    // ── Interleaved notifications under real traffic ─────────────────
+    // --- Interleaved notifications under real traffic ---
     // Exercises the codec's ability to demultiplex >BYTECOUNT:
     // notifications that arrive mid-multi-line-response.
     let (status_count, bytecount_count, state_count) = {
@@ -314,7 +314,7 @@ async fn server_mode_lifecycle() {
         "=== interleave test: {status_count} status, {bytecount_count} bytecount, {state_count} state ===",
     );
 
-    // ── Kill client → CLIENT:DISCONNECT ─────────────────────────────
+    // --- Kill client → CLIENT:DISCONNECT ---
     send_ok(
         &mut framed,
         OvpnCommand::ClientKill { cid, message: None },
@@ -331,7 +331,7 @@ async fn server_mode_lifecycle() {
     assert_eq!(dc_cid, cid);
     eprintln!("=== client killed, waiting for reconnect ===");
 
-    // ── Client reconnects → pending-auth → approve with auth-nt ─────
+    // --- Client reconnects → pending-auth → approve with auth-nt ---
     let (cid2, kid2, _) = wait_for_client_connect(&mut framed).await;
     eprintln!("=== CLIENT:CONNECT (reconnect for pending-auth) cid={cid2} kid={kid2} ===");
 
@@ -393,7 +393,7 @@ async fn server_mode_lifecycle() {
     assert_eq!(dc_cid2, cid2);
     eprintln!("=== pending-auth client killed, waiting for reconnect ===");
 
-    // ── Client reconnects → deny (last auth test — client exits) ────
+    // --- Client reconnects → deny (last auth test — client exits) ---
     let (cid3, kid3, _) = wait_for_client_connect(&mut framed).await;
     eprintln!("=== CLIENT:CONNECT (reconnect for deny) cid={cid3} kid={kid3} ===");
 
@@ -418,7 +418,7 @@ async fn server_mode_lifecycle() {
     assert_eq!(dc_cid3, cid3);
     eprintln!("=== client denied (client exits, no more reconnects) ===");
 
-    // ── Signal SIGUSR1 → state transitions ──────────────────────────
+    // --- Signal SIGUSR1 → state transitions ---
     send_ok(&mut framed, OvpnCommand::Signal(Signal::SigUsr1), "").await;
 
     let mut states = Vec::new();
@@ -439,7 +439,7 @@ async fn server_mode_lifecycle() {
     );
     eprintln!("=== SIGUSR1 states: {states:?} ===");
 
-    // ── Clean exit ──────────────────────────────────────────────────
+    // --- Clean exit ---
     framed.send(OvpnCommand::Exit).await.unwrap();
     let result = framed.next().await;
     assert!(result.is_none(), "stream should end after exit");

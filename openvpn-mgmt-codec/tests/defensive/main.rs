@@ -17,7 +17,7 @@ use bytes::BytesMut;
 use openvpn_mgmt_codec::*;
 use tokio_util::codec::{Decoder, Encoder};
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// --- Helpers ---
 
 /// Encode a command in the default (Sanitize) mode and return the wire bytes.
 fn encode(cmd: OvpnCommand) -> String {
@@ -35,9 +35,9 @@ fn try_encode_strict(cmd: OvpnCommand) -> Result<String, std::io::Error> {
     Ok(String::from_utf8(buf.to_vec()).unwrap())
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // 1. Newline injection via quote_and_escape
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 //
 // quote_and_escape only escapes `\` and `"`.  A newline byte passes
 // through verbatim, splitting one command into two on the wire.
@@ -152,9 +152,9 @@ fn static_challenge_response_newline_must_not_inject_command() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // 2. Newline injection in unescaped string fields
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 //
 // These fields are interpolated into the wire format with no escaping
 // at all — not even quote_and_escape.
@@ -280,9 +280,9 @@ fn client_pending_auth_extra_newline_must_not_inject_command() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // 3. END injection in multi-line blocks
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 //
 // write_block writes body lines verbatim.  A line that is exactly
 // "END" terminates the block early; remaining lines become standalone
@@ -360,9 +360,9 @@ fn client_auth_newline_in_config_line_must_not_inject() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // 4. auth_type quote breakout via AuthType::Unknown
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 //
 // auth_type is manually wrapped in `"..."` without escaping.
 // An Unknown type containing `"` breaks out of the quoting.
@@ -399,9 +399,9 @@ fn custom_auth_type_with_newline_must_not_inject_command() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // 5. Round-trip proof: injected command is actually parsed
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 //
 // These tests go one step further: encode a malicious payload, then
 // feed the wire bytes back through the decoder.  If the decoder sees
@@ -513,9 +513,9 @@ fn client_auth_end_injection_roundtrip() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // 6. Missed encoder fields (second-pass findings)
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 //
 // Found by auditing every `format!` interpolation in the encoder
 // that was not covered by sections 1–4.  Kill(Address { ip }) and
@@ -552,9 +552,9 @@ fn management_password_newline_must_not_inject_command() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // 7. Null byte injection
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 //
 // Null bytes are valid UTF-8 but are C string terminators.  OpenVPN's
 // management interface is C code — a \0 in a password could truncate
@@ -658,9 +658,9 @@ fn block_body_null_byte_must_be_stripped() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // 7b. Bare carriage-return (\r) injection
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 //
 // A bare \r (without \n) can cause display corruption on terminals
 // that interpret CR as "move cursor to column 0", overwriting the
@@ -719,9 +719,9 @@ fn strict_kill_common_name_bare_cr_rejected() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // 8. Raw command newline injection
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 //
 // Raw is an escape hatch, but it should still not allow injecting
 // multiple wire lines.  A user who builds `Raw("status\nkill all")`
@@ -743,9 +743,9 @@ fn raw_newline_must_not_inject_command() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // 9. EncoderMode::Strict — reject unsafe inputs
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 //
 // In Strict mode, encode() returns Err for the same inputs that
 // Sanitize mode silently strips. These tests mirror the Sanitize-mode
@@ -1023,7 +1023,7 @@ fn strict_custom_auth_type_with_newline_rejected() {
     );
 }
 
-// ── Strict mode: clean inputs pass through ───────────────────────
+// --- Strict mode: clean inputs pass through ---
 
 #[test]
 fn strict_clean_password_accepted() {

@@ -8,7 +8,7 @@ use bytes::BytesMut;
 use openvpn_mgmt_codec::*;
 use tokio_util::codec::{Decoder, Encoder};
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// --- Helpers ---
 
 fn codec() -> OvpnCodec {
     OvpnCodec::new()
@@ -36,9 +36,9 @@ fn decode_raw(codec: &mut OvpnCodec, data: &str) -> Vec<OvpnMessage> {
     msgs
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 // Multi-command sequences
-// ═════════════════════════════════════════════════════════════════════
+// ---  ---
 
 #[test]
 fn pid_then_version_sequence() {

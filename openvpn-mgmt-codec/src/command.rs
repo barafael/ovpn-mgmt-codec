@@ -74,7 +74,7 @@ impl fmt::Display for RemoteEntryRange {
 #[derive(Debug, Clone, PartialEq, Eq, strum::IntoStaticStr)]
 #[strum(serialize_all = "kebab-case")]
 pub enum OvpnCommand {
-    // ── Informational ────────────────────────────────────────────
+    // --- Informational ---
     /// Request connection status in the given format.
     /// Wire: `status` / `status 2` / `status 3`
     Status(StatusFormat),
@@ -112,7 +112,7 @@ pub enum OvpnCommand {
     /// Wire: `net`
     Net,
 
-    // ── Real-time notification control ───────────────────────────
+    // --- Real-time notification control ---
     /// Control real-time log streaming and/or dump log history.
     /// Wire: `log on` / `log off` / `log all` / `log on all` / `log 20`
     Log(StreamMode),
@@ -126,7 +126,7 @@ pub enum OvpnCommand {
     /// Wire: `bytecount 5` / `bytecount 0`
     ByteCount(u32),
 
-    // ── Connection control ───────────────────────────────────────
+    // --- Connection control ---
     /// Send a signal to the OpenVPN daemon.
     /// Wire: `signal SIGUSR1`
     Signal(Signal),
@@ -153,7 +153,7 @@ pub enum OvpnCommand {
     /// Wire: `hold release`
     HoldRelease,
 
-    // ── Authentication ───────────────────────────────────────────
+    // --- Authentication ---
     /// Supply a username for the given auth type.
     /// Wire: `username "Auth" myuser`
     Username {
@@ -181,7 +181,7 @@ pub enum OvpnCommand {
     /// Wire: `forget-passwords`
     ForgetPasswords,
 
-    // ── Challenge-response authentication ────────────────────────
+    // --- Challenge-response authentication ---
     /// Respond to a CRV1 dynamic challenge.
     /// Wire: `password "Auth" "CRV1::state_id::response"`
     ChallengeResponse {
@@ -203,7 +203,7 @@ pub enum OvpnCommand {
         response_b64: Redacted,
     },
 
-    // ── Interactive prompts (OpenVPN 2.1+) ───────────────────────
+    // --- Interactive prompts (OpenVPN 2.1+) ---
     /// Respond to a `>NEED-OK:` prompt.
     /// Wire: `needok token-insertion-request ok` / `needok ... cancel`
     NeedOk {
@@ -222,7 +222,7 @@ pub enum OvpnCommand {
         value: String,
     },
 
-    // ── PKCS#11 (OpenVPN 2.1+) ──────────────────────────────────
+    // --- PKCS#11 (OpenVPN 2.1+) ---
     /// Query available PKCS#11 certificate count.
     /// Wire: `pkcs11-id-count`
     Pkcs11IdCount,
@@ -231,7 +231,7 @@ pub enum OvpnCommand {
     /// Wire: `pkcs11-id-get 1`
     Pkcs11IdGet(u32),
 
-    // ── External key / RSA signature (OpenVPN 2.3+) ──────────────
+    // --- External key / RSA signature (OpenVPN 2.3+) ---
     /// Provide an RSA signature in response to `>RSA_SIGN:`.
     /// This is a multi-line command: the encoder writes `rsa-sig`,
     /// then each base64 line, then `END`.
@@ -240,7 +240,7 @@ pub enum OvpnCommand {
         base64_lines: Vec<String>,
     },
 
-    // ── Client management (server mode, OpenVPN 2.1+) ────────────
+    // --- Client management (server mode, OpenVPN 2.1+) ---
     /// Authorize a `>CLIENT:CONNECT` or `>CLIENT:REAUTH` and push config
     /// directives. Multi-line command: header, config lines, `END`.
     /// An empty `config_lines` produces a null block (header + immediate END),
@@ -287,7 +287,7 @@ pub enum OvpnCommand {
         message: Option<String>,
     },
 
-    // ── Remote/Proxy override ────────────────────────────────────
+    // --- Remote/Proxy override ---
     /// Respond to a `>REMOTE:` notification (requires `--management-query-remote`).
     /// Wire: `remote ACCEPT` / `remote SKIP` / `remote MOD host port`
     Remote(RemoteAction),
@@ -296,13 +296,13 @@ pub enum OvpnCommand {
     /// Wire: `proxy NONE` / `proxy HTTP host port [nct]` / `proxy SOCKS host port`
     Proxy(ProxyAction),
 
-    // ── Server statistics ─────────────────────────────────────────
+    // --- Server statistics ---
     /// Request aggregated server stats.
     /// Wire: `load-stats`
     /// Response: `SUCCESS: nclients=N,bytesin=N,bytesout=N`
     LoadStats,
 
-    // ── Extended client management (OpenVPN 2.5+) ────────────────
+    // --- Extended client management (OpenVPN 2.5+) ---
     /// Defer authentication for a client, allowing async auth backends.
     /// Wire: `client-pending-auth {CID} {KID} {EXTRA} {TIMEOUT}`
     ClientPendingAuth {
@@ -323,7 +323,7 @@ pub enum OvpnCommand {
         response: Redacted,
     },
 
-    // ── External key signature (OpenVPN 2.5+, management v2+) ─────
+    // --- External key signature (OpenVPN 2.5+, management v2+) ---
     /// Provide a signature in response to `>PK_SIGN:`. Replacement for
     /// `rsa-sig` that supports ECDSA, RSA-PSS, and other key types.
     /// Multi-line command: `pk-sig`, base64 lines, `END`.
@@ -332,14 +332,14 @@ pub enum OvpnCommand {
         base64_lines: Vec<String>,
     },
 
-    // ── ENV filter (OpenVPN 2.6+) ──────────────────────────────────
+    // --- ENV filter (OpenVPN 2.6+) ---
     /// Set the env-var filter level for `>CLIENT:ENV` blocks.
     /// Level 0 = all vars, higher levels filter more.
     /// Wire: `env-filter [level]`
     /// Response: `SUCCESS: env_filter_level=N`
     EnvFilter(u32),
 
-    // ── Remote entry queries (management v3+) ──────────────────────
+    // --- Remote entry queries (management v3+) ---
     /// Query the number of `--remote` entries configured.
     /// Wire: `remote-entry-count`
     /// Response: multi-line (count, then `END`).
@@ -350,7 +350,7 @@ pub enum OvpnCommand {
     /// Response: multi-line (`index,remote_string` per line, then `END`).
     RemoteEntryGet(RemoteEntryRange),
 
-    // ── Push updates (OpenVPN 2.7+, server mode) ───────────────────
+    // --- Push updates (OpenVPN 2.7+, server mode) ---
     /// Broadcast a push option update to all connected clients.
     /// Wire: `push-update-broad "options"`
     PushUpdateBroad {
@@ -367,7 +367,7 @@ pub enum OvpnCommand {
         options: String,
     },
 
-    // ── External certificate (OpenVPN 2.4+) ──────────────────────
+    // --- External certificate (OpenVPN 2.4+) ---
     /// Supply an external certificate in response to `>NEED-CERTIFICATE`.
     /// Multi-line command: header, PEM lines, `END`.
     /// Wire: `certificate\n{pem_lines}\nEND`
@@ -376,14 +376,14 @@ pub enum OvpnCommand {
         pem_lines: Vec<String>,
     },
 
-    // ── Management interface authentication ────────────────────────
+    // --- Management interface authentication ---
     /// Authenticate to the management interface itself. Sent as a bare
     /// line (no command prefix, no quoting) in response to
     /// [`crate::OvpnMessage::PasswordPrompt`].
     /// Wire: `{password}\n`
     ManagementPassword(Redacted),
 
-    // ── Session lifecycle ────────────────────────────────────────
+    // --- Session lifecycle ---
     /// Close the management session. OpenVPN keeps running and resumes
     /// listening for new management connections.
     Exit,
@@ -391,7 +391,7 @@ pub enum OvpnCommand {
     /// Identical to `Exit`.
     Quit,
 
-    // ── Escape hatch ─────────────────────────────────────────────
+    // --- Escape hatch ---
     /// Send a raw command string for anything not yet modeled above.
     /// The decoder expects a `SUCCESS:`/`ERROR:` response.
     Raw(String),
@@ -495,7 +495,7 @@ impl FromStr for OvpnCommand {
             .unwrap_or((line, ""));
 
         match cmd {
-            // ── Informational ────────────────────────────────────────
+            // --- Informational ---
             "version" => Ok(Self::Version),
             "pid" => Ok(Self::Pid),
             "help" => Ok(Self::Help),
@@ -545,7 +545,7 @@ impl FromStr for OvpnCommand {
                 CommandParseError::Syntax(format!("bytecount requires a number, got: {args}"))
             }),
 
-            // ── Connection control ───────────────────────────────────
+            // --- Connection control ---
             "signal" => Ok(Self::Signal(args.parse::<Signal>()?)),
 
             "kill" => {
@@ -576,7 +576,7 @@ impl FromStr for OvpnCommand {
                 _ => cmd_err(format!("invalid hold argument: {args}")),
             },
 
-            // ── Authentication ───────────────────────────────────────
+            // --- Authentication ---
             "username" => {
                 let (auth_type, value) =
                     args.split_once(char::is_whitespace)
@@ -611,7 +611,7 @@ impl FromStr for OvpnCommand {
 
             "forget-passwords" => Ok(Self::ForgetPasswords),
 
-            // ── Interactive prompts ──────────────────────────────────
+            // --- Interactive prompts ---
             "needok" => {
                 let (name, resp) =
                     args.rsplit_once(char::is_whitespace)
@@ -643,14 +643,14 @@ impl FromStr for OvpnCommand {
                 })
             }
 
-            // ── PKCS#11 ─────────────────────────────────────────────
+            // --- PKCS#11 ---
             "pkcs11-id-count" => Ok(Self::Pkcs11IdCount),
 
             "pkcs11-id-get" => args.parse::<u32>().map(Self::Pkcs11IdGet).map_err(|_| {
                 CommandParseError::Syntax(format!("pkcs11-id-get requires a number, got: {args}"))
             }),
 
-            // ── Client management (server mode) ─────────────────────
+            // --- Client management (server mode) ---
             "client-auth" => {
                 let mut parts = args.splitn(3, char::is_whitespace);
                 let cid = parts
@@ -739,7 +739,7 @@ impl FromStr for OvpnCommand {
                 Ok(Self::ClientKill { cid, message })
             }
 
-            // ── Remote/Proxy override ────────────────────────────────
+            // --- Remote/Proxy override ---
             "remote" => match args.split_whitespace().collect::<Vec<_>>().as_slice() {
                 ["accept" | "ACCEPT"] => Ok(Self::Remote(RemoteAction::Accept)),
                 ["skip" | "SKIP"] => Ok(Self::Remote(RemoteAction::Skip)),
@@ -777,7 +777,7 @@ impl FromStr for OvpnCommand {
                 _ => cmd_err("usage: proxy none|http <host> <port> [nct]|socks <host> <port>"),
             },
 
-            // ── ENV filter ──────────────────────────────────────────
+            // --- ENV filter ---
             "env-filter" => {
                 let level = if args.is_empty() {
                     0
@@ -789,7 +789,7 @@ impl FromStr for OvpnCommand {
                 Ok(Self::EnvFilter(level))
             }
 
-            // ── Remote entry queries ────────────────────────────────
+            // --- Remote entry queries ---
             "remote-entry-count" => Ok(Self::RemoteEntryCount),
 
             "remote-entry-get" => {
@@ -820,7 +820,7 @@ impl FromStr for OvpnCommand {
                 Ok(Self::RemoteEntryGet(range))
             }
 
-            // ── Push updates ────────────────────────────────────────
+            // --- Push updates ---
             "push-update-broad" => {
                 if args.is_empty() {
                     return cmd_err("usage: push-update-broad <options>");
@@ -845,7 +845,7 @@ impl FromStr for OvpnCommand {
                 })
             }
 
-            // ── Raw multi-line ──────────────────────────────────────
+            // --- Raw multi-line ---
             "raw-ml" => {
                 if args.is_empty() {
                     return cmd_err("usage: raw-ml <command>");
@@ -853,11 +853,11 @@ impl FromStr for OvpnCommand {
                 Ok(Self::RawMultiLine(args.to_string()))
             }
 
-            // ── Lifecycle ────────────────────────────────────────────
+            // --- Lifecycle ---
             "exit" => Ok(Self::Exit),
             "quit" => Ok(Self::Quit),
 
-            // ── Fallback: send as raw command ────────────────────────
+            // --- Fallback: send as raw command ---
             _ => Ok(Self::Raw(line.to_string())),
         }
     }
@@ -933,7 +933,7 @@ mod tests {
         assert_eq!(label, "byte-count");
     }
 
-    // ── connection_sequence ───────────────────────────────────────
+    // --- connection_sequence ---
 
     #[test]
     fn connection_sequence_with_bytecount() {
@@ -964,7 +964,7 @@ mod tests {
         );
     }
 
-    // ── FromStr: informational commands ──────────────────────────
+    // --- FromStr: informational commands ---
 
     #[test]
     fn parse_simple_commands() {
@@ -997,7 +997,7 @@ mod tests {
         assert!("status 4".parse::<OvpnCommand>().is_err());
     }
 
-    // ── FromStr: state / log / echo stream modes ─────────────────
+    // --- FromStr: state / log / echo stream modes ---
 
     #[test]
     fn parse_state_bare() {
@@ -1042,7 +1042,7 @@ mod tests {
         );
     }
 
-    // ── FromStr: verb / mute / bytecount ─────────────────────────
+    // --- FromStr: verb / mute / bytecount ---
 
     #[test]
     fn parse_verb() {
@@ -1065,7 +1065,7 @@ mod tests {
         assert!("bytecount".parse::<OvpnCommand>().is_err());
     }
 
-    // ── FromStr: signal ──────────────────────────────────────────
+    // --- FromStr: signal ---
 
     #[test]
     fn parse_signal() {
@@ -1088,7 +1088,7 @@ mod tests {
         assert!("signal SIGKILL".parse::<OvpnCommand>().is_err());
     }
 
-    // ── FromStr: kill ────────────────────────────────────────────
+    // --- FromStr: kill ---
 
     #[test]
     fn parse_kill_common_name() {
@@ -1117,7 +1117,7 @@ mod tests {
         assert!("kill".parse::<OvpnCommand>().is_err());
     }
 
-    // ── FromStr: hold ────────────────────────────────────────────
+    // --- FromStr: hold ---
 
     #[test]
     fn parse_hold() {
@@ -1128,7 +1128,7 @@ mod tests {
         assert!("hold bogus".parse::<OvpnCommand>().is_err());
     }
 
-    // ── FromStr: authentication ──────────────────────────────────
+    // --- FromStr: authentication ---
 
     #[test]
     fn parse_username() {
@@ -1177,7 +1177,7 @@ mod tests {
         assert!("auth-retry bogus".parse::<OvpnCommand>().is_err());
     }
 
-    // ── FromStr: interactive prompts ─────────────────────────────
+    // --- FromStr: interactive prompts ---
 
     #[test]
     fn parse_needok() {
@@ -1211,7 +1211,7 @@ mod tests {
         assert!("needstr".parse::<OvpnCommand>().is_err());
     }
 
-    // ── FromStr: PKCS#11 ─────────────────────────────────────────
+    // --- FromStr: PKCS#11 ---
 
     #[test]
     fn parse_pkcs11_id_get() {
@@ -1219,7 +1219,7 @@ mod tests {
         assert!("pkcs11-id-get abc".parse::<OvpnCommand>().is_err());
     }
 
-    // ── FromStr: client management ───────────────────────────────
+    // --- FromStr: client management ---
 
     #[test]
     fn parse_client_auth() {
@@ -1301,7 +1301,7 @@ mod tests {
         assert!("client-kill abc".parse::<OvpnCommand>().is_err());
     }
 
-    // ── FromStr: remote / proxy ──────────────────────────────────
+    // --- FromStr: remote / proxy ---
 
     #[test]
     fn parse_remote() {
@@ -1355,7 +1355,7 @@ mod tests {
         assert!("proxy".parse::<OvpnCommand>().is_err());
     }
 
-    // ── FromStr: raw / raw-ml / fallback ─────────────────────────
+    // --- FromStr: raw / raw-ml / fallback ---
 
     #[test]
     fn parse_raw_ml() {
@@ -1383,7 +1383,7 @@ mod tests {
         );
     }
 
-    // ── FromStr: error paths ────────────────────────────────────
+    // --- FromStr: error paths ---
 
     #[test]
     fn parse_state_invalid_stream_mode() {
@@ -1498,7 +1498,7 @@ mod tests {
         assert!("needstr".parse::<OvpnCommand>().is_err());
     }
 
-    // ── FromStr: new commands ───────────────────────────────────
+    // --- FromStr: new commands ---
 
     #[test]
     fn parse_env_filter() {

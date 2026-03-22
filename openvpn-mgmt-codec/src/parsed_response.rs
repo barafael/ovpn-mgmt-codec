@@ -167,7 +167,7 @@ pub fn parse_version(lines: &[String]) -> VersionInfo {
 mod tests {
     use super::*;
 
-    // ── parse_pid ────────────────────────────────────────────────
+    // --- parse_pid ---
 
     #[test]
     fn pid_normal() {
@@ -189,7 +189,7 @@ mod tests {
         assert!(parse_pid("pid=abc").is_err());
     }
 
-    // ── parse_load_stats ────────────────────────────────────────
+    // --- parse_load_stats ---
 
     #[test]
     fn load_stats_normal() {
@@ -231,7 +231,7 @@ mod tests {
         assert!(matches!(err, ParseResponseError::UnexpectedField(f) if f == "extra"));
     }
 
-    // ── parse_hold ──────────────────────────────────────────────
+    // --- parse_hold ---
 
     #[test]
     fn hold_active() {
@@ -253,7 +253,7 @@ mod tests {
         assert!(parse_hold("hold=maybe").is_err());
     }
 
-    // ── parse_version ───────────────────────────────────────────
+    // --- parse_version ---
 
     #[test]
     fn version_roundtrip() {

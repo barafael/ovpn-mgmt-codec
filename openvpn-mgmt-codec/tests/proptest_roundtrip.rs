@@ -10,7 +10,7 @@ use openvpn_mgmt_codec::*;
 use proptest::prelude::*;
 use tokio_util::codec::{Decoder, Encoder};
 
-// ── String strategies ──────────────────────────────────────────────
+// --- String strategies ---
 //
 // Wire-format constraints dictate which characters are safe in each
 // position. All strategies exclude \n, \r, \0 (line-oriented protocol).
@@ -33,7 +33,7 @@ fn safe_env_key() -> BoxedStrategy<String> {
         .boxed()
 }
 
-// ── Type strategies ────────────────────────────────────────────────
+// --- Type strategies ---
 //
 // Custom variants use a "CUSTOM_" prefix to guarantee they never
 // collide with known-variant parse strings.
@@ -130,7 +130,7 @@ fn arb_password_notification() -> BoxedStrategy<PasswordNotification> {
     .boxed()
 }
 
-// ── Wire serialization ─────────────────────────────────────────────
+// --- Wire serialization ---
 //
 // These functions produce the exact byte sequence the OpenVPN server
 // would emit for each message type. The decoder should reconstruct
@@ -246,7 +246,7 @@ fn notification_to_wire(notif: &Notification) -> String {
     }
 }
 
-// ── Decode helpers ─────────────────────────────────────────────────
+// --- Decode helpers ---
 
 /// Decode all messages from wire bytes using a fresh codec.
 fn decode_all(wire: &str) -> Vec<OvpnMessage> {
@@ -272,10 +272,10 @@ fn decode_with_command(cmd: OvpnCommand, wire: &str) -> Vec<OvpnMessage> {
     msgs
 }
 
-// ── Roundtrip tests ────────────────────────────────────────────────
+// --- Roundtrip tests ---
 
 proptest! {
-    // ── Self-describing messages (no codec state needed) ───────
+    // --- Self-describing messages (no codec state needed) ---
 
     #[test]
     fn roundtrip_success(text in safe_text()) {
@@ -301,7 +301,7 @@ proptest! {
         prop_assert_eq!(&msgs[0], &OvpnMessage::Info(text));
     }
 
-    // ── State-dependent messages ───────────────────────────────
+    // --- State-dependent messages ---
 
     #[test]
     fn roundtrip_multiline(
@@ -347,7 +347,7 @@ proptest! {
         );
     }
 
-    // ── Notification roundtrips ────────────────────────────────
+    // --- Notification roundtrips ---
 
     #[test]
     fn roundtrip_notif_state(
@@ -566,7 +566,7 @@ proptest! {
     }
 }
 
-// ── PasswordPrompt (no proptest needed — deterministic) ────────────
+// --- PasswordPrompt (no proptest needed — deterministic) ---
 
 #[test]
 fn roundtrip_password_prompt() {
@@ -575,11 +575,11 @@ fn roundtrip_password_prompt() {
     assert_eq!(msgs[0], OvpnMessage::PasswordPrompt);
 }
 
-// ═══════════════════════════════════════════════════════════════════
+// ---  ---
 // Additional property tests
-// ═══════════════════════════════════════════════════════════════════
+// ---  ---
 
-// ── Adversarial string strategy ────────────────────────────────────
+// --- Adversarial string strategy ---
 //
 // Generates strings designed to break the line-oriented protocol:
 // embedded newlines, null bytes, protocol keywords, block terminators.
@@ -605,7 +605,7 @@ fn adversarial_string() -> BoxedStrategy<String> {
     .boxed()
 }
 
-// ── Command sub-type strategies ────────────────────────────────────
+// --- Command sub-type strategies ---
 
 fn arb_status_format() -> BoxedStrategy<StatusFormat> {
     prop_oneof![
@@ -650,7 +650,7 @@ fn arb_need_ok_response() -> BoxedStrategy<NeedOkResponse> {
     prop_oneof![Just(NeedOkResponse::Ok), Just(NeedOkResponse::Cancel),].boxed()
 }
 
-// ── OvpnCommand strategies ─────────────────────────────────────────
+// --- OvpnCommand strategies ---
 
 /// Build a strategy for every `OvpnCommand` variant, parameterized by
 /// the string strategy used for text fields. Using `safe_text()` gives
@@ -678,7 +678,7 @@ fn arb_ovpn_command_with(s: BoxedStrategy<String>) -> BoxedStrategy<OvpnCommand>
     ];
 
     proptest::strategy::Union::new(vec![
-        // ── Parameterless ──────────────────────────────────────
+        // --- Parameterless ---
         Just(OvpnCommand::State).boxed(),
         Just(OvpnCommand::Version).boxed(),
         Just(OvpnCommand::Pid).boxed(),
@@ -693,7 +693,7 @@ fn arb_ovpn_command_with(s: BoxedStrategy<String>) -> BoxedStrategy<OvpnCommand>
         Just(OvpnCommand::ForgetPasswords).boxed(),
         Just(OvpnCommand::Exit).boxed(),
         Just(OvpnCommand::Quit).boxed(),
-        // ── Simple parameterized ───────────────────────────────
+        // --- Simple parameterized ---
         arb_status_format().prop_map(OvpnCommand::Status).boxed(),
         arb_stream_mode().prop_map(OvpnCommand::StateStream).boxed(),
         arb_stream_mode().prop_map(OvpnCommand::Log).boxed(),
@@ -713,7 +713,7 @@ fn arb_ovpn_command_with(s: BoxedStrategy<String>) -> BoxedStrategy<OvpnCommand>
         kill.prop_map(OvpnCommand::Kill).boxed(),
         remote.prop_map(OvpnCommand::Remote).boxed(),
         proxy.prop_map(OvpnCommand::Proxy).boxed(),
-        // ── String commands ────────────────────────────────────
+        // --- String commands ---
         (arb_auth_type(), s.clone())
             .prop_map(|(at, v)| OvpnCommand::Username {
                 auth_type: at,
@@ -764,7 +764,7 @@ fn arb_ovpn_command_with(s: BoxedStrategy<String>) -> BoxedStrategy<OvpnCommand>
                 timeout: t,
             })
             .boxed(),
-        // ── Complex with Option strings ────────────────────────
+        // --- Complex with Option strings ---
         (
             any::<u64>(),
             any::<u64>(),
@@ -778,7 +778,7 @@ fn arb_ovpn_command_with(s: BoxedStrategy<String>) -> BoxedStrategy<OvpnCommand>
                 client_reason: cr,
             })
             .boxed(),
-        // ── Multi-line commands ────────────────────────────────
+        // --- Multi-line commands ---
         prop::collection::vec(s.clone(), 0..5)
             .prop_map(|lines| OvpnCommand::RsaSig {
                 base64_lines: lines,
@@ -798,7 +798,7 @@ fn arb_ovpn_command_with(s: BoxedStrategy<String>) -> BoxedStrategy<OvpnCommand>
         prop::collection::vec(s.clone(), 0..5)
             .prop_map(|lines| OvpnCommand::Certificate { pem_lines: lines })
             .boxed(),
-        // ── Client management (numeric only) ───────────────────
+        // --- Client management (numeric only) ---
         (any::<u64>(), any::<u64>())
             .prop_map(|(c, k)| OvpnCommand::ClientAuthNt { cid: c, kid: k })
             .boxed(),
@@ -817,7 +817,7 @@ fn arb_ovpn_command_adversarial() -> BoxedStrategy<OvpnCommand> {
     arb_ovpn_command_with(adversarial_string())
 }
 
-// ── Composite notification & wire strategies ───────────────────────
+// --- Composite notification & wire strategies ---
 
 /// Any single-line notification (excludes `Client`, which is multi-line).
 fn arb_single_line_notification() -> BoxedStrategy<Notification> {
@@ -923,10 +923,10 @@ fn arb_self_describing_wire() -> BoxedStrategy<String> {
     .boxed()
 }
 
-// ── Property tests ─────────────────────────────────────────────────
+// --- Property tests ---
 
 proptest! {
-    // ── 1. Robustness: no panics on arbitrary input ────────────
+    // --- 1. Robustness: no panics on arbitrary input ---
     //
     // The decoder must never panic on arbitrary byte input. Any byte
     // sequence — including invalid UTF-8, truncated messages, and
@@ -948,7 +948,7 @@ proptest! {
         // Reaching here without panicking satisfies the property.
     }
 
-    // ── 2. Encoder well-formedness ─────────────────────────────
+    // --- 2. Encoder well-formedness ---
     //
     // Encoded commands must always produce valid UTF-8 bytes ending
     // with \n, containing no \r or \0 bytes — even when string fields
@@ -968,7 +968,7 @@ proptest! {
         prop_assert!(!wire.contains('\0'), "must not contain \\0");
     }
 
-    // ── 3 + 5. Line count / injection resistance ───────────────
+    // --- 3 + 5. Line count / injection resistance ---
     //
     // Encoding any single OvpnCommand must produce exactly the expected
     // number of newline-terminated lines: 1 for single-line commands,
@@ -998,7 +998,7 @@ proptest! {
         );
     }
 
-    // ── 4. Encoding determinism ────────────────────────────────
+    // --- 4. Encoding determinism ---
     //
     // Encoding the same command twice with independent codec instances
     // must produce byte-identical wire output. The encoder is a pure
@@ -1017,7 +1017,7 @@ proptest! {
         prop_assert_eq!(a, b);
     }
 
-    // ── 6. Self-describing message state independence ──────────
+    // --- 6. Self-describing message state independence ---
     //
     // Self-describing messages (SUCCESS, ERROR, notifications,
     // ENTER PASSWORD) must decode identically regardless of what
@@ -1046,7 +1046,7 @@ proptest! {
         prop_assert_eq!(a, b);
     }
 
-    // ── 7. Interleaving safety ─────────────────────────────────
+    // --- 7. Interleaving safety ---
     //
     // A single-line notification arriving mid-way through a multi-line
     // response block must be emitted immediately as a separate message,
@@ -1092,7 +1092,7 @@ proptest! {
         prop_assert_eq!(&msgs[1], &OvpnMessage::MultiLine(lines));
     }
 
-    // ── 8a. Partial-input equivalence (single-line) ────────────
+    // --- 8a. Partial-input equivalence (single-line) ---
     //
     // Feeding the wire bytes of a valid message one byte at a time
     // must produce the same decoded messages as feeding all bytes at
@@ -1118,7 +1118,7 @@ proptest! {
         prop_assert_eq!(bulk, incremental);
     }
 
-    // ── 8b. Partial-input equivalence (multi-line CLIENT) ──────
+    // --- 8b. Partial-input equivalence (multi-line CLIENT) ---
     //
     // The partial-input property also holds for multi-line CLIENT
     // notification blocks: feeding the wire bytes one byte at a time
@@ -1152,7 +1152,7 @@ proptest! {
         prop_assert_eq!(bulk, incremental);
     }
 
-    // ── 9. CLIENT notification atomicity ───────────────────────
+    // --- 9. CLIENT notification atomicity ---
     //
     // A CLIENT notification block with N env pairs must always decode
     // to exactly one Notification::Client message containing exactly
@@ -1184,7 +1184,7 @@ proptest! {
         }
     }
 
-    // ── 10. Multi-line block integrity ─────────────────────────
+    // --- 10. Multi-line block integrity ---
     //
     // A multi-line response block with N lines (none being "END" or
     // starting with ">") must always decode to a MultiLine message
@@ -1220,7 +1220,7 @@ proptest! {
         }
     }
 
-    // ── 11. Monotonic progress ─────────────────────────────────
+    // --- 11. Monotonic progress ---
     //
     // The decoder must always make progress: each decode() call that
     // returns Ok(Some(_)) must consume at least one byte from the
