@@ -2016,3 +2016,10 @@ mod tests {
         );
     }
 }
+    // Upper-bound byte count for the entire block on the wire:
+    //   header.len()  — header line text (e.g. ">client-auth 7 42")
+    //   + 1           — '\n' terminating the header
+    //   + Σ(l.len()+2)— each body line's text + "\r\n" (2 bytes)
+    //   + 4           — "END\n" block terminator
+    // This is a conservative estimate: sanitized lines may shrink or grow
+    // slightly, but over-reserving is harmless — only written bytes count.
