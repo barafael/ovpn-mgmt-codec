@@ -48,8 +48,6 @@ pub enum EncoderMode {
 ///
 /// Returned as the inner error of [`std::io::Error`] when [`EncoderMode::Strict`]
 /// is active and the input contains characters that would corrupt the wire protocol.
-/// Callers can recover it via
-/// [`get_ref()`](std::io::Error::get_ref) and `downcast_ref::<EncodeError>()`.
 #[derive(Debug, thiserror::Error)]
 pub enum EncodeError {
     /// A field contains `\n`, `\r`, or `\0`.
