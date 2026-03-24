@@ -40,16 +40,15 @@ impl FromStr for AuthType {
 
     /// Parse a recognized auth type string.
     ///
-    /// Recognized values: `Auth`, `PrivateKey` / `Private Key`,
-    /// `HTTPProxy` / `HTTP Proxy`, `SOCKSProxy` / `SOCKS Proxy`.
+    /// Recognized values: `Auth`, `Private Key`, `HTTP Proxy`, `SOCKS Proxy`.
     /// Returns `Err` for anything else — use [`AuthType::Unknown`] explicitly
     /// if forward-compatible fallback is desired.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "Auth" => Ok(Self::Auth),
-            "PrivateKey" | "Private Key" => Ok(Self::PrivateKey),
-            "HTTPProxy" | "HTTP Proxy" => Ok(Self::HttpProxy),
-            "SOCKSProxy" | "SOCKS Proxy" => Ok(Self::SocksProxy),
+            "Private Key" => Ok(Self::PrivateKey),
+            "HTTP Proxy" => Ok(Self::HttpProxy),
+            "SOCKS Proxy" => Ok(Self::SocksProxy),
             other => Err(ParseAuthTypeError(other.to_string())),
         }
     }
@@ -99,23 +98,10 @@ mod tests {
     }
 
     #[test]
-    fn auth_type_aliases() {
-        assert_eq!(
-            "PrivateKey".parse::<AuthType>().unwrap(),
-            AuthType::PrivateKey
-        );
-        assert_eq!(
-            "Private Key".parse::<AuthType>().unwrap(),
-            AuthType::PrivateKey
-        );
-        assert_eq!(
-            "HTTPProxy".parse::<AuthType>().unwrap(),
-            AuthType::HttpProxy
-        );
-        assert_eq!(
-            "SOCKSProxy".parse::<AuthType>().unwrap(),
-            AuthType::SocksProxy
-        );
+    fn auth_type_phantom_aliases_are_rejected() {
+        assert!("PrivateKey".parse::<AuthType>().is_err());
+        assert!("HTTPProxy".parse::<AuthType>().is_err());
+        assert!("SOCKSProxy".parse::<AuthType>().is_err());
     }
 
     #[test]

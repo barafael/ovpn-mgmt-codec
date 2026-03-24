@@ -822,6 +822,161 @@ fn arb_ovpn_command_adversarial() -> BoxedStrategy<OvpnCommand> {
     arb_ovpn_command_with(adversarial_string())
 }
 
+/// Commands whose encode→`FromStr` roundtrip is lossless.
+///
+/// Excluded variants and why:
+/// - `ChallengeResponse` / `StaticChallengeResponse`: encode as
+///   `password "Auth" "CRV1:..."`, which parses back as `Password` — lossy by design.
+/// - `ManagementPassword`: bare line with no command prefix, parses as `Raw`.
+/// - `Raw` / `RawMultiLine`: encode verbatim, parse as whatever the text matches.
+/// - Multi-line commands (`RsaSig`, `PkSig`, `ClientAuth`, `Certificate`):
+///   `FromStr` only sees the header line, not the body.
+///
+/// Wire format reference:
+/// https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
+fn arb_roundtrippable_command() -> BoxedStrategy<OvpnCommand> {
+    // Values that survive quote_and_escape → next_token roundtrip:
+    // no \n, \r, \0 (stripped by wire_safe), and printable ASCII.
+    let safe_val = "[a-zA-Z0-9 _.;!?@#$%^&*+=~|-]{1,40}".boxed();
+
+    // Hostnames, IPs, and kill targets are not quoted on the wire, so they
+    // must not contain whitespace or colons (which are field delimiters).
+    let safe_host = "[a-zA-Z0-9_.!?@#$%^&*+=~-]{1,40}".boxed();
+
+    let kill = prop_oneof![
+        safe_host.clone().prop_map(KillTarget::CommonName),
+        (arb_transport_protocol(), safe_host.clone(), any::<u16>())
+            .prop_map(|(protocol, ip, port)| KillTarget::Address { protocol, ip, port }),
+    ];
+    let remote = prop_oneof![
+        Just(RemoteAction::Accept),
+        Just(RemoteAction::Skip),
+        (safe_host.clone(), any::<u16>())
+            .prop_map(|(host, port)| RemoteAction::Modify { host, port }),
+    ];
+    let proxy = prop_oneof![
+        Just(ProxyAction::None),
+        (safe_host.clone(), any::<u16>(), any::<bool>()).prop_map(|(host, port, nct)| {
+            ProxyAction::Http {
+                host,
+                port,
+                non_cleartext_only: nct,
+            }
+        }),
+        (safe_host.clone(), any::<u16>())
+            .prop_map(|(host, port)| ProxyAction::Socks { host, port }),
+    ];
+
+    proptest::strategy::Union::new(vec![
+        // --- Parameterless ---
+        Just(OvpnCommand::State).boxed(),
+        Just(OvpnCommand::Version).boxed(),
+        Just(OvpnCommand::Pid).boxed(),
+        Just(OvpnCommand::Help).boxed(),
+        Just(OvpnCommand::Net).boxed(),
+        Just(OvpnCommand::HoldQuery).boxed(),
+        Just(OvpnCommand::HoldOn).boxed(),
+        Just(OvpnCommand::HoldOff).boxed(),
+        Just(OvpnCommand::HoldRelease).boxed(),
+        Just(OvpnCommand::Pkcs11IdCount).boxed(),
+        Just(OvpnCommand::LoadStats).boxed(),
+        Just(OvpnCommand::ForgetPasswords).boxed(),
+        Just(OvpnCommand::Exit).boxed(),
+        Just(OvpnCommand::Quit).boxed(),
+        // --- Simple parameterized ---
+        arb_status_format().prop_map(OvpnCommand::Status).boxed(),
+        arb_stream_mode().prop_map(OvpnCommand::StateStream).boxed(),
+        arb_stream_mode().prop_map(OvpnCommand::Log).boxed(),
+        arb_stream_mode().prop_map(OvpnCommand::Echo).boxed(),
+        any::<u32>().prop_map(OvpnCommand::ByteCount).boxed(),
+        arb_signal().prop_map(OvpnCommand::Signal).boxed(),
+        prop::option::of(0..16u8)
+            .prop_map(OvpnCommand::Verb)
+            .boxed(),
+        prop::option::of(any::<u32>())
+            .prop_map(OvpnCommand::Mute)
+            .boxed(),
+        any::<u32>().prop_map(OvpnCommand::Pkcs11IdGet).boxed(),
+        arb_auth_retry_mode()
+            .prop_map(OvpnCommand::AuthRetry)
+            .boxed(),
+        kill.prop_map(OvpnCommand::Kill).boxed(),
+        remote.prop_map(OvpnCommand::Remote).boxed(),
+        proxy.prop_map(OvpnCommand::Proxy).boxed(),
+        // --- Quoted commands (the ones that prompted this test) ---
+        (arb_auth_type(), safe_val.clone())
+            .prop_map(|(at, v)| OvpnCommand::Username {
+                auth_type: at,
+                value: Redacted::new(v),
+            })
+            .boxed(),
+        (arb_auth_type(), safe_val.clone())
+            .prop_map(|(at, v)| OvpnCommand::Password {
+                auth_type: at,
+                value: Redacted::new(v),
+            })
+            .boxed(),
+        (safe_host.clone(), arb_need_ok_response())
+            .prop_map(|(n, r)| OvpnCommand::NeedOk {
+                name: n,
+                response: r,
+            })
+            .boxed(),
+        (safe_host.clone(), safe_val.clone())
+            .prop_map(|(n, v)| OvpnCommand::NeedStr { name: n, value: v })
+            .boxed(),
+        // --- Push updates (quoted options) ---
+        safe_val
+            .clone()
+            .prop_map(|o| OvpnCommand::PushUpdateBroad { options: o })
+            .boxed(),
+        (any::<u64>(), safe_val.clone())
+            .prop_map(|(c, o)| OvpnCommand::PushUpdateCid { cid: c, options: o })
+            .boxed(),
+        // --- Client management ---
+        (any::<u64>(), any::<u64>())
+            .prop_map(|(c, k)| OvpnCommand::ClientAuthNt { cid: c, kid: k })
+            .boxed(),
+        (
+            any::<u64>(),
+            any::<u64>(),
+            safe_val.clone(),
+            prop::option::of(safe_val.clone()),
+        )
+            .prop_map(|(c, k, r, cr)| OvpnCommand::ClientDeny {
+                cid: c,
+                kid: k,
+                reason: r,
+                client_reason: cr,
+            })
+            .boxed(),
+        (any::<u64>(), prop::option::of(safe_host.clone()))
+            .prop_map(|(c, m)| OvpnCommand::ClientKill { cid: c, message: m })
+            .boxed(),
+        // --- ENV filter ---
+        any::<u32>().prop_map(OvpnCommand::EnvFilter).boxed(),
+        // --- Remote entry queries ---
+        Just(OvpnCommand::RemoteEntryCount).boxed(),
+        // --- Extended client management ---
+        (any::<u64>(), any::<u64>(), safe_host.clone(), any::<u32>())
+            .prop_map(|(c, k, e, t)| OvpnCommand::ClientPendingAuth {
+                cid: c,
+                kid: k,
+                extra: e,
+                timeout: t,
+            })
+            .boxed(),
+        // cr-response value is base64, not quoted on the wire — no spaces.
+        safe_host
+            .clone()
+            .prop_map(|r| OvpnCommand::CrResponse {
+                response: Redacted::new(r),
+            })
+            .boxed(),
+    ])
+    .boxed()
+}
+
 // --- Composite notification & wire strategies ---
 
 /// Any single-line notification (excludes `Client`, which is multi-line).
@@ -1261,5 +1416,36 @@ proptest! {
                 "decoder exceeded {max} iterations",
             );
         }
+    }
+
+    // --- 12. Command encode→parse roundtrip ---
+    //
+    // Every command that has a lossless text representation must
+    // survive an encode→FromStr roundtrip: the wire string produced
+    // by the codec encoder, when trimmed and parsed back via
+    // OvpnCommand::from_str, must yield the original command.
+    //
+    // This is the property that would have caught the quoted-auth-type
+    // spec non-compliance (password "Private Key" failing to parse).
+    //
+    // Wire format reference:
+    // https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
+
+    #[test]
+    fn command_encode_parse_roundtrip(cmd in arb_roundtrippable_command()) {
+        let mut codec = OvpnCodec::new();
+        let mut buf = BytesMut::new();
+        codec.encode(cmd.clone(), &mut buf).unwrap();
+        let wire = std::str::from_utf8(&buf)
+            .expect("encoded output must be valid UTF-8");
+        let trimmed = wire.trim();
+        let parsed: OvpnCommand = trimmed.parse()
+            .unwrap_or_else(|e| panic!(
+                "FromStr failed on encoder output {trimmed:?}: {e}"
+            ));
+        prop_assert_eq!(
+            parsed, cmd,
+            "roundtrip mismatch: wire={:?}", trimmed,
+        );
     }
 }

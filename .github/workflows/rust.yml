@@ -44,6 +44,8 @@ jobs:
       run: cargo test -p openvpn-mgmt-codec --features conformance-tests --test conformance_server
     - name: Run password notification conformance test
       run: cargo test -p openvpn-mgmt-codec --features conformance-tests --test conformance_password
+    - name: Run wire-format conformance tests
+      run: cargo test -p openvpn-mgmt-codec --features conformance-tests --test conformance_wire_format -- --test-threads=1
     - name: Run basic conformance tests
       run: cargo test -p openvpn-mgmt-codec --features conformance-tests --test conformance -- --test-threads=1
     - name: Show container logs on failure

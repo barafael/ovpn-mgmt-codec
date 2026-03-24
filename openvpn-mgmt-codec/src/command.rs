@@ -15,6 +15,54 @@ use crate::{
 };
 use tracing::warn;
 
+/// Extract the next token from a management-interface command line.
+///
+/// The OpenVPN management interface uses a simple lexer
+/// ([`manage.c` → `parse_line()`][parse_line]) that recognises
+/// double-quoted tokens with backslash escaping (`\\` → `\`, `\"` → `"`).
+/// Unquoted tokens are delimited by whitespace.
+///
+/// Returns `(token, rest)` where *token* has quotes/escapes resolved and
+/// *rest* is the remaining input (leading whitespace trimmed).
+///
+/// [parse_line]: https://github.com/OpenVPN/openvpn/blob/master/src/openvpn/manage.c
+///
+/// # Spec reference
+///
+/// Escaping rules: [`management-notes.txt`][spec], "Command Parsing" section.
+///
+/// [spec]: https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
+fn next_token(input: &str) -> Option<(String, &str)> {
+    let input = input.trim_start();
+    if input.is_empty() {
+        return None;
+    }
+
+    if let Some(quoted) = input.strip_prefix('"') {
+        // Quoted token: consume until unescaped closing quote.
+        let mut chars = quoted.chars();
+        let mut token = String::new();
+        loop {
+            match chars.next() {
+                None | Some('"') => break,
+                Some('\\') => match chars.next() {
+                    Some(c) => token.push(c),
+                    None => break,
+                },
+                Some(c) => token.push(c),
+            }
+        }
+        let rest = chars.as_str().trim_start();
+        Some((token, rest))
+    } else {
+        // Unquoted token: delimited by whitespace.
+        match input.split_once(char::is_whitespace) {
+            Some((tok, rest)) => Some((tok.to_string(), rest.trim_start())),
+            None => Some((input.to_string(), "")),
+        }
+    }
+}
+
 /// Error returned when parsing a command string fails.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CommandParseError {
@@ -556,11 +604,9 @@ impl FromStr for OvpnCommand {
                 } else {
                     args.parse::<u8>()
                         .map(|n| Self::Verb(Some(n)))
-                        .map_err(|_| {
-                            CommandParseError::InvalidNumber {
-                                field: "verbosity",
-                                input: args.to_string(),
-                            }
+                        .map_err(|_| CommandParseError::InvalidNumber {
+                            field: "verbosity",
+                            input: args.to_string(),
                         })
                 }
             }
@@ -571,11 +617,9 @@ impl FromStr for OvpnCommand {
                 } else {
                     args.parse::<u32>()
                         .map(|n| Self::Mute(Some(n)))
-                        .map_err(|_| {
-                            CommandParseError::InvalidNumber {
-                                field: "mute threshold",
-                                input: args.to_string(),
-                            }
+                        .map_err(|_| CommandParseError::InvalidNumber {
+                            field: "mute threshold",
+                            input: args.to_string(),
                         })
                 }
             }
@@ -623,33 +667,44 @@ impl FromStr for OvpnCommand {
             },
 
             // --- Authentication ---
+            // Wire format per management-notes.txt:
+            //   username "Auth" myuser
+            //   password "Private Key" "foo\"bar"
+            // https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
+            //
+            // Auth types are quoted and may contain spaces ("HTTP Proxy",
+            // "SOCKS Proxy", "Private Key"), so we use quote-aware
+            // tokenization matching manage.c's parse_line() lexer.
+            // https://github.com/OpenVPN/openvpn/blob/master/src/openvpn/manage.c
             "username" => {
-                let (auth_type, value) =
-                    args.split_once(char::is_whitespace)
-                        .ok_or(CommandParseError::MissingArgs(
-                            "usage: username <auth-type> <value>",
-                        ))?;
+                let (auth_type_str, rest) = next_token(args).ok_or(
+                    CommandParseError::MissingArgs("usage: username <auth-type> <value>"),
+                )?;
+                let (value, _) = next_token(rest).ok_or(CommandParseError::MissingArgs(
+                    "usage: username <auth-type> <value>",
+                ))?;
                 Ok(Self::Username {
-                    auth_type: auth_type
+                    auth_type: auth_type_str
                         .parse()
                         .inspect_err(|error| warn!(%error, "unknown auth type"))
-                        .unwrap_or_else(|_| AuthType::Unknown(auth_type.to_string())),
-                    value: value.trim().into(),
+                        .unwrap_or(AuthType::Unknown(auth_type_str)),
+                    value: value.into(),
                 })
             }
 
             "password" => {
-                let (auth_type, value) =
-                    args.split_once(char::is_whitespace)
-                        .ok_or(CommandParseError::MissingArgs(
-                            "usage: password <auth-type> <value>",
-                        ))?;
+                let (auth_type_str, rest) = next_token(args).ok_or(
+                    CommandParseError::MissingArgs("usage: password <auth-type> <value>"),
+                )?;
+                let (value, _) = next_token(rest).ok_or(CommandParseError::MissingArgs(
+                    "usage: password <auth-type> <value>",
+                ))?;
                 Ok(Self::Password {
-                    auth_type: auth_type
+                    auth_type: auth_type_str
                         .parse()
                         .inspect_err(|error| warn!(%error, "unknown auth type"))
-                        .unwrap_or_else(|_| AuthType::Unknown(auth_type.to_string())),
-                    value: value.trim().into(),
+                        .unwrap_or(AuthType::Unknown(auth_type_str)),
+                    value: value.into(),
                 })
             }
 
@@ -681,16 +736,18 @@ impl FromStr for OvpnCommand {
                 })
             }
 
+            // Wire format per management-notes.txt:
+            //   needstr <name> <value>
+            // where <value> may be quoted+escaped.
+            // https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
             "needstr" => {
-                let (name, value) =
-                    args.split_once(char::is_whitespace)
-                        .ok_or(CommandParseError::MissingArgs(
-                            "usage: needstr <name> <value>",
-                        ))?;
-                Ok(Self::NeedStr {
-                    name: name.to_string(),
-                    value: value.trim().to_string(),
-                })
+                let (name, rest) = next_token(args).ok_or(CommandParseError::MissingArgs(
+                    "usage: needstr <name> <value>",
+                ))?;
+                let (value, _) = next_token(rest).ok_or(CommandParseError::MissingArgs(
+                    "usage: needstr <name> <value>",
+                ))?;
+                Ok(Self::NeedStr { name, value })
             }
 
             // --- PKCS#11 ---
@@ -748,29 +805,27 @@ impl FromStr for OvpnCommand {
                 })
             }
 
+            // Wire format per management-notes.txt:
+            //   client-deny <cid> <kid> "reason" ["client-reason"]
+            // Reason strings are quoted+escaped on the wire.
+            // https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
             "client-deny" => {
-                let mut parts = args.splitn(4, char::is_whitespace);
-                let cid = parts
-                    .next()
-                    .ok_or(CommandParseError::MissingArgs(
-                        "usage: client-deny <cid> <kid> <reason> [client-reason]",
-                    ))?
+                let (cid_str, rest) = next_token(args).ok_or(CommandParseError::MissingArgs(
+                    "usage: client-deny <cid> <kid> <reason> [client-reason]",
+                ))?;
+                let cid = cid_str
                     .parse::<u64>()
                     .map_err(|_| CommandParseError::MissingArgs("cid must be a number"))?;
-                let kid = parts
-                    .next()
-                    .ok_or(CommandParseError::MissingArgs(
-                        "usage: client-deny <cid> <kid> <reason> [client-reason]",
-                    ))?
+                let (kid_str, rest) = next_token(rest).ok_or(CommandParseError::MissingArgs(
+                    "usage: client-deny <cid> <kid> <reason> [client-reason]",
+                ))?;
+                let kid = kid_str
                     .parse::<u64>()
                     .map_err(|_| CommandParseError::MissingArgs("kid must be a number"))?;
-                let reason = parts
-                    .next()
-                    .ok_or(CommandParseError::MissingArgs(
-                        "usage: client-deny <cid> <kid> <reason> [client-reason]",
-                    ))?
-                    .to_string();
-                let client_reason = parts.next().map(|s| s.to_string());
+                let (reason, rest) = next_token(rest).ok_or(CommandParseError::MissingArgs(
+                    "usage: client-deny <cid> <kid> <reason> [client-reason]",
+                ))?;
+                let client_reason = next_token(rest).map(|(cr, _)| cr);
                 Ok(Self::ClientDeny {
                     cid,
                     kid,
@@ -784,12 +839,12 @@ impl FromStr for OvpnCommand {
                     Some((c, m)) => (c, Some(m.trim().to_string())),
                     None => (args, None),
                 };
-                let cid = cid_str.parse::<u64>().map_err(|_| {
-                    CommandParseError::InvalidNumber {
+                let cid = cid_str
+                    .parse::<u64>()
+                    .map_err(|_| CommandParseError::InvalidNumber {
                         field: "client-kill CID",
                         input: cid_str.to_string(),
-                    }
-                })?;
+                    })?;
                 Ok(Self::ClientKill { cid, message })
             }
 
@@ -836,10 +891,11 @@ impl FromStr for OvpnCommand {
                 let level = if args.is_empty() {
                     0
                 } else {
-                    args.parse::<u32>().map_err(|_| CommandParseError::InvalidNumber {
-                        field: "env-filter level",
-                        input: args.to_string(),
-                    })?
+                    args.parse::<u32>()
+                        .map_err(|_| CommandParseError::InvalidNumber {
+                            field: "env-filter level",
+                            input: args.to_string(),
+                        })?
                 };
                 Ok(Self::EnvFilter(level))
             }
@@ -878,27 +934,78 @@ impl FromStr for OvpnCommand {
             }
 
             // --- Push updates ---
+            // Wire format per management-notes.txt:
+            //   push-update-broad "options"
+            //   push-update-cid <cid> "options"
+            // Options are quoted+escaped on the wire.
+            // https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
             "push-update-broad" => {
-                if args.is_empty() {
-                    return cmd_err("usage: push-update-broad <options>");
-                }
-                Ok(Self::PushUpdateBroad {
-                    options: args.to_string(),
-                })
+                let (options, _) = next_token(args).ok_or(CommandParseError::MissingArgs(
+                    "usage: push-update-broad <options>",
+                ))?;
+                Ok(Self::PushUpdateBroad { options })
             }
 
             "push-update-cid" => {
-                let (cid_str, options) =
-                    args.split_once(char::is_whitespace)
-                        .ok_or(CommandParseError::MissingArgs(
-                            "usage: push-update-cid <cid> <options>",
-                        ))?;
+                let (cid_str, rest) = next_token(args).ok_or(CommandParseError::MissingArgs(
+                    "usage: push-update-cid <cid> <options>",
+                ))?;
                 let cid = cid_str.parse::<u64>().map_err(|_| {
                     CommandParseError::MissingArgs("push-update-cid: cid must be a number")
                 })?;
-                Ok(Self::PushUpdateCid {
+                let (options, _) = next_token(rest).ok_or(CommandParseError::MissingArgs(
+                    "usage: push-update-cid <cid> <options>",
+                ))?;
+                Ok(Self::PushUpdateCid { cid, options })
+            }
+
+            // --- Extended client management ---
+            // Wire format per management-notes.txt:
+            //   client-pending-auth <cid> <kid> <extra> <timeout>
+            // https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
+            "client-pending-auth" => {
+                let (cid_str, rest) = next_token(args).ok_or(CommandParseError::MissingArgs(
+                    "usage: client-pending-auth <cid> <kid> <extra> <timeout>",
+                ))?;
+                let cid = cid_str
+                    .parse::<u64>()
+                    .map_err(|_| CommandParseError::MissingArgs("cid must be a number"))?;
+                let (kid_str, rest) = next_token(rest).ok_or(CommandParseError::MissingArgs(
+                    "usage: client-pending-auth <cid> <kid> <extra> <timeout>",
+                ))?;
+                let kid = kid_str
+                    .parse::<u64>()
+                    .map_err(|_| CommandParseError::MissingArgs("kid must be a number"))?;
+                let (extra, rest) = next_token(rest).ok_or(CommandParseError::MissingArgs(
+                    "usage: client-pending-auth <cid> <kid> <extra> <timeout>",
+                ))?;
+                let (timeout_str, _) = next_token(rest).ok_or(CommandParseError::MissingArgs(
+                    "usage: client-pending-auth <cid> <kid> <extra> <timeout>",
+                ))?;
+                let timeout =
+                    timeout_str
+                        .parse::<u32>()
+                        .map_err(|_| CommandParseError::InvalidNumber {
+                            field: "client-pending-auth timeout",
+                            input: timeout_str,
+                        })?;
+                Ok(Self::ClientPendingAuth {
                     cid,
-                    options: options.trim().to_string(),
+                    kid,
+                    extra,
+                    timeout,
+                })
+            }
+
+            // Wire format per management-notes.txt:
+            //   cr-response <base64-response>
+            // https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
+            "cr-response" => {
+                let (response, _) = next_token(args).ok_or(CommandParseError::MissingArgs(
+                    "usage: cr-response <response>",
+                ))?;
+                Ok(Self::CrResponse {
+                    response: Redacted::new(response),
                 })
             }
 
@@ -1209,6 +1316,42 @@ mod tests {
         assert_eq!("hold off".parse(), Ok(OvpnCommand::HoldOff));
         assert_eq!("hold release".parse(), Ok(OvpnCommand::HoldRelease));
         assert!("hold bogus".parse::<OvpnCommand>().is_err());
+    }
+
+    // --- next_token (OpenVPN lexer) ---
+
+    #[test]
+    fn next_token_unquoted() {
+        let (tok, rest) = next_token("Auth s3cret").unwrap();
+        assert_eq!(tok, "Auth");
+        assert_eq!(rest, "s3cret");
+    }
+
+    #[test]
+    fn next_token_quoted_simple() {
+        let (tok, rest) = next_token(r#""Private Key" "s3cret""#).unwrap();
+        assert_eq!(tok, "Private Key");
+        assert_eq!(rest, r#""s3cret""#);
+    }
+
+    #[test]
+    fn next_token_quoted_with_escapes() {
+        // manage.c lexer: \" → ", \\ → \
+        let (tok, _) = next_token(r#""foo\\\"bar""#).unwrap();
+        assert_eq!(tok, r#"foo\"bar"#);
+    }
+
+    #[test]
+    fn next_token_empty() {
+        assert!(next_token("").is_none());
+        assert!(next_token("   ").is_none());
+    }
+
+    #[test]
+    fn next_token_last_token_no_trailing() {
+        let (tok, rest) = next_token("onlyone").unwrap();
+        assert_eq!(tok, "onlyone");
+        assert_eq!(rest, "");
     }
 
     // --- FromStr: authentication ---
@@ -1526,6 +1669,90 @@ mod tests {
         assert!("password Auth".parse::<OvpnCommand>().is_err());
     }
 
+    // ---- Spec-compliance: quoted auth types with spaces ----
+    // Wire format per management-notes.txt ("Command Parsing" section):
+    //   password "Private Key" "foo\"bar"
+    //   username "Auth" myuser
+    // https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
+    //
+    // Auth types are quoted on the wire and may contain spaces.
+    // The server validates with streq() in manage.c:
+    // https://github.com/OpenVPN/openvpn/blob/master/src/openvpn/manage.c
+
+    #[test]
+    fn parse_password_quoted_spaced_auth_type() {
+        let cmd: OvpnCommand = r#"password "Private Key" "s3cret""#.parse().unwrap();
+        assert_eq!(
+            cmd,
+            OvpnCommand::Password {
+                auth_type: AuthType::PrivateKey,
+                value: "s3cret".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_password_quoted_http_proxy() {
+        let cmd: OvpnCommand = r#"password "HTTP Proxy" "proxypass""#.parse().unwrap();
+        assert_eq!(
+            cmd,
+            OvpnCommand::Password {
+                auth_type: AuthType::HttpProxy,
+                value: "proxypass".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_password_quoted_socks_proxy() {
+        let cmd: OvpnCommand = r#"password "SOCKS Proxy" "sockspass""#.parse().unwrap();
+        assert_eq!(
+            cmd,
+            OvpnCommand::Password {
+                auth_type: AuthType::SocksProxy,
+                value: "sockspass".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_username_quoted_spaced_auth_type() {
+        let cmd: OvpnCommand = r#"username "HTTP Proxy" "proxyuser""#.parse().unwrap();
+        assert_eq!(
+            cmd,
+            OvpnCommand::Username {
+                auth_type: AuthType::HttpProxy,
+                value: "proxyuser".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_password_roundtrip_spaced_auth_types() {
+        // The encoder produces quoted wire format; the parser must
+        // be able to consume its own output.
+        use crate::OvpnCodec;
+        use bytes::BytesMut;
+        use tokio_util::codec::Encoder;
+
+        for auth_type in [
+            AuthType::PrivateKey,
+            AuthType::HttpProxy,
+            AuthType::SocksProxy,
+        ] {
+            let original = OvpnCommand::Password {
+                auth_type: auth_type.clone(),
+                value: "test".into(),
+            };
+            let mut codec = OvpnCodec::new();
+            let mut buf = BytesMut::new();
+            codec.encode(original.clone(), &mut buf).unwrap();
+            let wire = String::from_utf8(buf.to_vec()).unwrap();
+            let parsed: OvpnCommand = wire.trim().parse().unwrap();
+            assert_eq!(parsed, original);
+        }
+    }
+
     #[test]
     fn parse_client_auth_non_numeric_cid() {
         assert!("client-auth abc 1".parse::<OvpnCommand>().is_err());
@@ -1623,7 +1850,9 @@ mod tests {
 
     #[test]
     fn parse_push_update_broad() {
-        let cmd: OvpnCommand = "push-update-broad route 10.0.0.0".parse().unwrap();
+        // Wire format: push-update-broad "route 10.0.0.0"
+        // https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
+        let cmd: OvpnCommand = r#"push-update-broad "route 10.0.0.0""#.parse().unwrap();
         assert_eq!(
             cmd,
             OvpnCommand::PushUpdateBroad {
@@ -1649,7 +1878,9 @@ mod tests {
 
     #[test]
     fn parse_push_update_cid() {
-        let cmd: OvpnCommand = "push-update-cid 42 route 10.0.0.0".parse().unwrap();
+        // Wire format: push-update-cid 42 "route 10.0.0.0"
+        // https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
+        let cmd: OvpnCommand = r#"push-update-cid 42 "route 10.0.0.0""#.parse().unwrap();
         assert_eq!(
             cmd,
             OvpnCommand::PushUpdateCid {
@@ -1659,5 +1890,76 @@ mod tests {
         );
         assert!("push-update-cid".parse::<OvpnCommand>().is_err());
         assert!("push-update-cid abc opts".parse::<OvpnCommand>().is_err());
+    }
+
+    // --- FromStr: client-pending-auth ---
+
+    #[test]
+    fn parse_client_pending_auth() {
+        // Wire format: client-pending-auth <cid> <kid> <extra> <timeout>
+        // https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
+        let cmd: OvpnCommand = "client-pending-auth 42 1 WEB_AUTH::https://example.com 120"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            cmd,
+            OvpnCommand::ClientPendingAuth {
+                cid: 42,
+                kid: 1,
+                extra: "WEB_AUTH::https://example.com".to_string(),
+                timeout: 120,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_client_pending_auth_missing_args() {
+        assert!("client-pending-auth".parse::<OvpnCommand>().is_err());
+        assert!("client-pending-auth 1".parse::<OvpnCommand>().is_err());
+        assert!("client-pending-auth 1 2".parse::<OvpnCommand>().is_err());
+        assert!(
+            "client-pending-auth 1 2 extra"
+                .parse::<OvpnCommand>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn parse_client_pending_auth_non_numeric() {
+        assert!(
+            "client-pending-auth abc 1 extra 120"
+                .parse::<OvpnCommand>()
+                .is_err()
+        );
+        assert!(
+            "client-pending-auth 1 abc extra 120"
+                .parse::<OvpnCommand>()
+                .is_err()
+        );
+        assert!(
+            "client-pending-auth 1 2 extra abc"
+                .parse::<OvpnCommand>()
+                .is_err()
+        );
+    }
+
+    // --- FromStr: cr-response ---
+
+    #[test]
+    fn parse_cr_response() {
+        // Wire format: cr-response <base64-response>
+        // https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
+        let cmd: OvpnCommand = "cr-response dGVzdA==".parse().unwrap();
+        assert_eq!(
+            cmd,
+            OvpnCommand::CrResponse {
+                response: Redacted::new("dGVzdA=="),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_cr_response_missing_arg() {
+        assert!("cr-response".parse::<OvpnCommand>().is_err());
     }
 }
