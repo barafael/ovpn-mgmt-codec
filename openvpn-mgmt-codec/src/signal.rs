@@ -44,18 +44,15 @@ impl FromStr for Signal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
 
-    #[test]
-    fn parse_roundtrip() {
-        for sig in [
-            Signal::SigHup,
-            Signal::SigTerm,
-            Signal::SigUsr1,
-            Signal::SigUsr2,
-        ] {
-            let s = sig.to_string();
-            assert_eq!(s.parse::<Signal>().unwrap(), sig);
-        }
+    #[test_case(Signal::SigHup)]
+    #[test_case(Signal::SigTerm)]
+    #[test_case(Signal::SigUsr1)]
+    #[test_case(Signal::SigUsr2)]
+    fn parse_roundtrip(sig: Signal) {
+        let s = sig.to_string();
+        assert_eq!(s.parse::<Signal>().unwrap(), sig);
     }
 
     #[test]

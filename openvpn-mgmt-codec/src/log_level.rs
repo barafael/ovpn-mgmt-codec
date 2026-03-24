@@ -66,20 +66,15 @@ impl FromStr for LogLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
 
-    #[test]
-    fn parse_roundtrip() {
-        for (flag, expected) in [
-            ("I", LogLevel::Info),
-            ("D", LogLevel::Debug),
-            ("W", LogLevel::Warning),
-            ("N", LogLevel::NonFatal),
-            ("F", LogLevel::Fatal),
-        ] {
-            let parsed: LogLevel = flag.parse().unwrap();
-            assert_eq!(parsed, expected);
-            assert_eq!(parsed.to_string(), flag);
-        }
+    #[test_case("I" => LogLevel::Info)]
+    #[test_case("D" => LogLevel::Debug)]
+    #[test_case("W" => LogLevel::Warning)]
+    #[test_case("N" => LogLevel::NonFatal)]
+    #[test_case("F" => LogLevel::Fatal)]
+    fn parse_roundtrip(flag: &str) -> LogLevel {
+        flag.parse().unwrap()
     }
 
     #[test]

@@ -62,19 +62,16 @@ impl FromStr for StreamMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
 
-    #[test]
-    fn parse_roundtrip() {
-        for mode in [
-            StreamMode::On,
-            StreamMode::Off,
-            StreamMode::All,
-            StreamMode::OnAll,
-            StreamMode::Recent(42),
-        ] {
-            let s = mode.to_string();
-            assert_eq!(s.parse::<StreamMode>().unwrap(), mode);
-        }
+    #[test_case(StreamMode::On)]
+    #[test_case(StreamMode::Off)]
+    #[test_case(StreamMode::All)]
+    #[test_case(StreamMode::OnAll)]
+    #[test_case(StreamMode::Recent(42))]
+    fn parse_roundtrip(mode: StreamMode) {
+        let s = mode.to_string();
+        assert_eq!(s.parse::<StreamMode>().unwrap(), mode);
     }
 
     #[test]

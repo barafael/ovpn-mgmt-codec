@@ -43,13 +43,14 @@ impl FromStr for StatusFormat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
 
-    #[test]
-    fn display_roundtrip() {
-        for fmt in [StatusFormat::V1, StatusFormat::V2, StatusFormat::V3] {
-            let s = fmt.to_string();
-            assert_eq!(s.parse::<StatusFormat>().unwrap(), fmt);
-        }
+    #[test_case(StatusFormat::V1)]
+    #[test_case(StatusFormat::V2)]
+    #[test_case(StatusFormat::V3)]
+    fn display_roundtrip(fmt: StatusFormat) {
+        let s = fmt.to_string();
+        assert_eq!(s.parse::<StatusFormat>().unwrap(), fmt);
     }
 
     #[test]
