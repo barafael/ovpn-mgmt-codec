@@ -15,37 +15,54 @@
 //! exponential backoff so you can restart OpenVPN without restarting
 //! this program.
 
+use clap::Parser;
 use futures::{SinkExt, StreamExt};
-use openvpn_mgmt_codec::command::connection_sequence;
-use openvpn_mgmt_codec::stream::{ManagementEvent, classify};
-use openvpn_mgmt_codec::{Notification, OvpnCodec, OvpnCommand, StatusFormat};
+use openvpn_mgmt_codec::{
+    Notification, OvpnCodec, OvpnCommand, StatusFormat,
+    command::connection_sequence,
+    stream::{ManagementEvent, classify},
+};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
+use tracing::{debug, error, info, warn};
+
+/// Client-mode example: connect to OpenVPN's management interface.
+#[derive(Parser)]
+struct Args {
+    /// Address to connect to.
+    #[arg(default_value = "127.0.0.1:7505")]
+    address: String,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "127.0.0.1:7505".to_string());
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "client_mode=debug,openvpn_mgmt_codec=info".parse().unwrap()),
+        )
+        .init();
+
+    let addr = Args::parse().address;
 
     let mut backoff = std::time::Duration::from_secs(1);
 
     loop {
-        println!("connecting to {addr}...");
+        info!(%addr, "connecting");
 
         match TcpStream::connect(&addr).await {
             Ok(stream) => {
                 backoff = std::time::Duration::from_secs(1);
-                println!("connected to {addr}");
+                info!(%addr, "connected");
 
-                if let Err(e) = handle_connection(stream).await {
-                    eprintln!("session error: {e}");
+                if let Err(error) = handle_connection(stream).await {
+                    error!(%error, "session error");
                 }
 
-                println!("connection lost, reconnecting...");
+                warn!("connection lost, reconnecting");
             }
-            Err(e) => {
-                eprintln!("connect failed: {e}, retrying in {backoff:?}");
+            Err(error) => {
+                warn!(%error, ?backoff, "connect failed, retrying");
             }
         }
 
@@ -70,16 +87,16 @@ async fn handle_connection(stream: TcpStream) -> Result<(), Box<dyn std::error::
 
     while let Some(event) = mgmt.next().await {
         match event? {
-            ManagementEvent::Notification(n) => {
-                println!("notification: {n:?}");
+            ManagementEvent::Notification(notification) => {
+                info!(?notification, "notification");
 
-                if let Notification::Fatal { message } = &n {
-                    eprintln!("OpenVPN fatal: {message}");
+                if let Notification::Fatal { message } = &notification {
+                    error!(%message, "OpenVPN fatal");
                     break;
                 }
             }
-            ManagementEvent::Response(msg) => {
-                println!("response: {msg:?}");
+            ManagementEvent::Response(response) => {
+                debug!(?response, "response");
             }
         }
     }

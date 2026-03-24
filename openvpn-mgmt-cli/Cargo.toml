@@ -9,6 +9,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)
 
 [dependencies]
 anyhow = "1"
+clap = { version = "4", features = ["derive"] }
 futures = "0.3"
 openvpn-mgmt-codec = { path = "../openvpn-mgmt-codec" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "io-std"] }

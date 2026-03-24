@@ -15,9 +15,9 @@
 //! Once connected, type a command name at the `ovpn>` prompt (e.g. `version`,
 //! `status`, `state on`). Type `help` to list commands, `quit` to disconnect.
 
+use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use openvpn_mgmt_codec::{Notification, OvpnCodec, OvpnCommand, OvpnMessage, PasswordNotification};
-use std::env;
 use std::io::Write as _;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::net::TcpStream;
@@ -28,15 +28,7 @@ use std::path::Path;
 #[cfg(unix)]
 use tokio::net::UnixStream;
 
-const USAGE: &str = "\
-openvpn-mgmt-cli — interactive OpenVPN management interface client
-
-USAGE:
-    openvpn-mgmt-cli [ADDRESS]
-
-ADDRESS defaults to 127.0.0.1:7505.
-On Unix, a path to a Unix domain socket is also accepted.
-
+const RUNTIME_COMMANDS: &str = "\
 COMMANDS (at the ovpn> prompt):
     version                        Show OpenVPN and management interface version
     status [1|2|3]                 Dump connection status (format V1/V2/V3)
@@ -70,6 +62,19 @@ COMMANDS (at the ovpn> prompt):
     raw-ml <command>               Send raw command, expect multi-line response
     exit / quit                    Disconnect
     <anything else>                Sent as raw command";
+
+/// Interactive OpenVPN management interface client.
+///
+/// Connects to a running OpenVPN management socket and lets you send
+/// typed commands while printing decoded messages in real time.
+#[derive(Parser)]
+#[command(after_help = RUNTIME_COMMANDS)]
+struct Cli {
+    /// Management interface address [default: 127.0.0.1:7505].
+    /// On Unix, a path to a Unix domain socket is also accepted.
+    #[arg(default_value = "127.0.0.1:7505")]
+    address: String,
+}
 
 /// Format a Unix timestamp as a local datetime string.
 fn format_timestamp(ts: u64) -> String {
@@ -324,14 +329,8 @@ where
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let addr = match env::args().nth(1) {
-        Some(a) if a == "--help" || a == "-h" => {
-            println!("{USAGE}");
-            return Ok(());
-        }
-        Some(a) => a,
-        None => "127.0.0.1:7505".to_string(),
-    };
+    let cli = Cli::parse();
+    let addr = cli.address;
 
     // If the address looks like a file path, try connecting as a Unix socket.
     #[cfg(unix)]
