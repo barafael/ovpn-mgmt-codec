@@ -17,6 +17,8 @@
 //! connect to OpenVPN or OpenVPN connects to *you*. The only difference
 //! is who calls `bind`/`listen` vs `connect`.
 
+use std::net::SocketAddr;
+
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use openvpn_mgmt_codec::{
@@ -24,9 +26,9 @@ use openvpn_mgmt_codec::{
     command::connection_sequence,
     stream::{ManagementEvent, classify},
 };
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 /// Server-mode example: listen for OpenVPN to connect to us.
 #[derive(Parser)]
@@ -54,43 +56,52 @@ async fn main() -> anyhow::Result<()> {
         let (stream, peer) = listener.accept().await?;
         info!(%peer, "accepted connection");
 
-        let framed = Framed::new(stream, OvpnCodec::new());
-        let (mut sink, raw_stream) = framed.split();
-        let mut mgmt = raw_stream.map(classify);
+        tokio::spawn(async move {
+            if let Err(error) = handle_connection(stream, peer).await {
+                error!(%peer, %error, "session error");
+            }
+            info!(%peer, "connection closed");
+        });
+    }
+}
 
-        // Run the standard startup sequence.
-        for cmd in connection_sequence(5) {
-            sink.send(cmd).await?;
-        }
+async fn handle_connection(stream: TcpStream, peer: SocketAddr) -> anyhow::Result<()> {
+    let framed = Framed::new(stream, OvpnCodec::new());
+    let (mut sink, raw_stream) = framed.split();
+    let mut mgmt = raw_stream.map(classify);
 
-        // Process events until the connection closes.
-        while let Some(event) = mgmt.next().await {
-            match event? {
-                ManagementEvent::Notification(notification) => {
-                    info!(?notification, "notification");
+    // Run the standard startup sequence.
+    for cmd in connection_sequence(5) {
+        sink.send(cmd).await?;
+    }
 
-                    // Auto-approve all client connections (demo only!).
-                    if let openvpn_mgmt_codec::Notification::Client {
-                        event: openvpn_mgmt_codec::ClientEvent::Connect,
-                        cid,
-                        kid: Some(kid),
-                        ..
-                    } = &notification
-                    {
-                        info!(%cid, "auto-approving client");
-                        sink.send(OvpnCommand::ClientAuthNt {
-                            cid: *cid,
-                            kid: *kid,
-                        })
-                        .await?;
-                    }
-                }
-                ManagementEvent::Response(response) => {
-                    debug!(?response, "response");
+    // Process events until the connection closes.
+    while let Some(event) = mgmt.next().await {
+        match event? {
+            ManagementEvent::Notification(notification) => {
+                info!(%peer, ?notification, "notification");
+
+                // Auto-approve all client connections (demo only!).
+                if let openvpn_mgmt_codec::Notification::Client {
+                    event: openvpn_mgmt_codec::ClientEvent::Connect,
+                    cid,
+                    kid: Some(kid),
+                    ..
+                } = &notification
+                {
+                    info!(%peer, %cid, "auto-approving client");
+                    sink.send(OvpnCommand::ClientAuthNt {
+                        cid: *cid,
+                        kid: *kid,
+                    })
+                    .await?;
                 }
             }
+            ManagementEvent::Response(response) => {
+                debug!(%peer, ?response, "response");
+            }
         }
-
-        info!(%peer, "connection closed, waiting for next");
     }
+
+    Ok(())
 }
