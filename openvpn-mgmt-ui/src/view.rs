@@ -399,6 +399,16 @@ impl App {
         );
         rows.push(crate::chart::throughput_chart_sized(&self.throughput, 200.0));
 
+        #[cfg(debug_assertions)]
+        rows.push(
+            checkbox(self.demo_chart)
+                .label("Demo data")
+                .on_toggle(|_| Message::ToggleDemoChart)
+                .size(14)
+                .text_size(11)
+                .into(),
+        );
+
         rows.push(Space::new().height(8).into());
         rows.push(section_heading("Version"));
         if let Some(ref lines) = self.version_lines {

@@ -267,4 +267,12 @@ pub(crate) enum Message {
     // -- Animation --
     /// Tick for the "Connecting..." dot animation.
     ConnectingTick,
+
+    // -- Debug --
+    /// Toggle synthetic throughput data for chart testing.
+    #[cfg(debug_assertions)]
+    ToggleDemoChart,
+    /// Periodic tick that feeds synthetic data into the chart.
+    #[cfg(debug_assertions)]
+    DemoChartTick,
 }

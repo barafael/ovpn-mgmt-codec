@@ -19,5 +19,6 @@ plotters = { version = "0.3.7", default-features = false, features = ["line_seri
 plotters-iced2 = "0.14.0"
 tokio = { version = "1", features = ["net", "sync", "macros", "time"] }
 tokio-util = { version = "0.7", features = ["codec"] }
+rand = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

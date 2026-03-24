@@ -153,6 +153,21 @@ pub(crate) struct App {
     pub(crate) theme: Theme,
     /// Dot animation counter for "Connecting" state (0..=2).
     pub(crate) connecting_dots: u8,
+    /// Whether the demo chart is active (feeds synthetic throughput data).
+    #[cfg(debug_assertions)]
+    pub(crate) demo_chart: bool,
+    /// Cumulative synthetic byte counters and current rates for smooth random walk.
+    #[cfg(debug_assertions)]
+    demo_state: DemoState,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Default)]
+struct DemoState {
+    cumulative_in: u64,
+    cumulative_out: u64,
+    rate_in: f64,
+    rate_out: f64,
 }
 
 // -------------------------------------------------------------------
@@ -243,6 +258,10 @@ impl App {
             ctrl_held: false,
             theme: Theme::GruvboxDark,
             connecting_dots: 0,
+            #[cfg(debug_assertions)]
+            demo_chart: false,
+            #[cfg(debug_assertions)]
+            demo_state: DemoState::default(),
         };
 
         (app, event_task)
@@ -574,6 +593,39 @@ impl App {
             // -- Animation -------------------------------------------------------
             Message::ConnectingTick => {
                 self.connecting_dots = (self.connecting_dots + 1) % 4;
+            }
+
+            // -- Debug -----------------------------------------------------------
+            #[cfg(debug_assertions)]
+            Message::ToggleDemoChart => {
+                self.demo_chart = !self.demo_chart;
+                if self.demo_chart {
+                    self.demo_state = DemoState {
+                        rate_in: 200_000.0,
+                        rate_out: 80_000.0,
+                        ..DemoState::default()
+                    };
+                    self.throughput.reset();
+                }
+            }
+            #[cfg(debug_assertions)]
+            Message::DemoChartTick => {
+                use rand::Rng;
+                let mut rng = rand::rng();
+                let ds = &mut self.demo_state;
+                // Random walk with mean-reversion: rates drift smoothly.
+                ds.rate_in += (200_000.0 - ds.rate_in) * 0.05
+                    + rng.random_range(-40_000.0f64..40_000.0);
+                ds.rate_out += (80_000.0 - ds.rate_out) * 0.05
+                    + rng.random_range(-15_000.0f64..15_000.0);
+                ds.rate_in = ds.rate_in.max(1000.0);
+                ds.rate_out = ds.rate_out.max(500.0);
+                ds.cumulative_in += ds.rate_in as u64;
+                ds.cumulative_out += ds.rate_out as u64;
+                self.throughput
+                    .push(ds.cumulative_in, ds.cumulative_out, 1);
+                self.bytes_in = ds.cumulative_in;
+                self.bytes_out = ds.cumulative_out;
             }
         }
 
@@ -1205,26 +1257,12 @@ impl App {
             )));
         }
 
-        if self.startup.log != StartupStreamMode::Off {
-            commands.push(OvpnCommand::Log(self.startup.log.to_stream_mode()));
-        }
-        if self.startup.state != StartupStreamMode::Off {
-            commands.push(OvpnCommand::StateStream(self.startup.state.to_stream_mode()));
-        }
-        if self.startup.echo != StartupStreamMode::Off {
-            commands.push(OvpnCommand::Echo(self.startup.echo.to_stream_mode()));
-        }
-
+        // Quick commands first — these return a single Success/MultiLine
+        // and won't flood the connection.
         commands.push(OvpnCommand::Pid);
         // One-shot state query so we always know the current state,
         // even if no >STATE: transition fires during connect.
         commands.push(OvpnCommand::State);
-
-        if self.startup.query_version {
-            commands.push(OvpnCommand::Version);
-        }
-
-        commands.push(OvpnCommand::Help);
 
         if let Ok(seconds) = self.startup.bytecount_interval.parse::<u32>()
             && seconds > 0
@@ -1235,6 +1273,24 @@ impl App {
         if self.startup.hold_release {
             commands.push(OvpnCommand::HoldRelease);
         }
+
+        // Streaming commands — may produce large history dumps that
+        // eat the timeout, so run them after the quick essentials.
+        if self.startup.log != StartupStreamMode::Off {
+            commands.push(OvpnCommand::Log(self.startup.log.to_stream_mode()));
+        }
+        if self.startup.state != StartupStreamMode::Off {
+            commands.push(OvpnCommand::StateStream(self.startup.state.to_stream_mode()));
+        }
+        if self.startup.echo != StartupStreamMode::Off {
+            commands.push(OvpnCommand::Echo(self.startup.echo.to_stream_mode()));
+        }
+
+        // Non-critical queries last — OK if these time out.
+        if self.startup.query_version {
+            commands.push(OvpnCommand::Version);
+        }
+        commands.push(OvpnCommand::Help);
 
         commands
     }
@@ -1296,15 +1352,24 @@ impl App {
             _ => None,
         });
 
+        let mut subs = vec![keyboard];
+
         if self.connection_state == ConnectionState::Connecting {
-            iced::Subscription::batch([
-                keyboard,
+            subs.push(
                 iced::time::every(std::time::Duration::from_millis(400))
                     .map(|_| Message::ConnectingTick),
-            ])
-        } else {
-            keyboard
+            );
         }
+
+        #[cfg(debug_assertions)]
+        if self.demo_chart {
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(1))
+                    .map(|_| Message::DemoChartTick),
+            );
+        }
+
+        iced::Subscription::batch(subs)
     }
 }
 
