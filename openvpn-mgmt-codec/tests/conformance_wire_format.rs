@@ -75,11 +75,14 @@ async fn basic_commands_accepted() {
     // Release hold first so state transitions work.
     send_ok(&mut framed, OvpnCommand::HoldRelease, "hold release").await;
 
+    // `net` is Windows-only — OpenVPN returns a contextual error on
+    // Linux.  Wire-format acceptance is still verified (no syntax error).
+    send_and_check_accepted(&mut framed, OvpnCommand::Net, "net").await;
+
     let cases: Vec<(OvpnCommand, &str)> = vec![
         (OvpnCommand::Version, "version"),
         (OvpnCommand::Help, "help"),
         (OvpnCommand::Pid, "pid"),
-        (OvpnCommand::Net, "net"),
         (OvpnCommand::LoadStats, "load-stats"),
         (OvpnCommand::Status(StatusFormat::V1), "status 1"),
         (OvpnCommand::Status(StatusFormat::V2), "status 2"),
@@ -121,146 +124,9 @@ async fn basic_commands_accepted() {
     framed.send(OvpnCommand::Exit).await.unwrap();
 }
 
-/// Password commands with quoted, spaced auth types against a real
-/// OpenVPN instance that is prompting for credentials.
-///
-/// This is the test that would have caught the original spec
-/// non-compliance: the encoder produces `password "Auth" "testpass"`
-/// and OpenVPN's `parse_line()` validates it with `streq()`.
-///
-/// Uses the `openvpn-client-password` container (port 7508) which has
-/// `--management-query-passwords`, and the `openvpn-server` container
-/// (port 7506) which auto-approves clients.
-#[tokio::test]
-#[traced_test]
-async fn password_wire_format_accepted_by_openvpn() {
-    use std::time::Duration;
-    use tokio::net::TcpStream;
-    use tokio::time::timeout;
-    use tokio_util::codec::Framed;
-
-    const SERVER_ADDR: &str = "127.0.0.1:7506";
-    const CLIENT_PASSWORD_ADDR: &str = "127.0.0.1:7508";
-
-    // --- Set up server: connect, release hold, auto-approve ---
-    let server_stream = timeout(Duration::from_secs(30), async {
-        loop {
-            match TcpStream::connect(SERVER_ADDR).await {
-                Ok(stream) => return stream,
-                Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
-            }
-        }
-    })
-    .await
-    .expect("server management not reachable within 30s");
-    let mut server = Framed::new(server_stream, OvpnCodec::new());
-
-    let msg = common::recv(&mut server).await;
-    assert!(matches!(msg, OvpnMessage::PasswordPrompt));
-    server
-        .send(OvpnCommand::ManagementPassword(
-            common::MGMT_PASSWORD.into(),
-        ))
-        .await
-        .unwrap();
-    let _auth_ok = common::recv(&mut server).await;
-    let _info = common::recv(&mut server).await;
-    let _hold = common::recv(&mut server).await;
-    send_ok(&mut server, OvpnCommand::HoldRelease, "hold release").await;
-
-    // Auto-approve CLIENT:CONNECT.
-    tokio::spawn(async move {
-        use futures::StreamExt;
-        loop {
-            let msg = match timeout(Duration::from_secs(10), server.next()).await {
-                Ok(Some(Ok(msg))) => msg,
-                _ => return,
-            };
-            if let OvpnMessage::Notification(Notification::Client {
-                event: ClientEvent::Connect,
-                cid,
-                kid: Some(kid),
-                ..
-            }) = msg
-            {
-                if server
-                    .send(OvpnCommand::ClientAuthNt { cid, kid })
-                    .await
-                    .is_err()
-                {
-                    return;
-                }
-            }
-        }
-    });
-
-    // --- Set up client: wait for >PASSWORD:Need 'Auth' ---
-    let mut client = connect_and_auth(CLIENT_PASSWORD_ADDR).await;
-    send_ok(&mut client, OvpnCommand::StateStream(StreamMode::On), "").await;
-    send_ok(&mut client, OvpnCommand::HoldRelease, "hold release").await;
-
-    let pw_notification = timeout(Duration::from_secs(30), async {
-        loop {
-            let msg = common::recv_raw(&mut client).await;
-            if let OvpnMessage::Notification(Notification::Password(ref pw)) = msg {
-                return pw.clone();
-            }
-        }
-    })
-    .await
-    .expect("timed out waiting for >PASSWORD: notification");
-
-    assert!(
-        matches!(
-            &pw_notification,
-            PasswordNotification::NeedAuth { auth_type } if *auth_type == AuthType::Auth
-        ),
-        "expected NeedAuth/Auth, got {pw_notification:?}",
-    );
-
-    // --- The actual wire format test ---
-    // Send username and password via the codec encoder. OpenVPN's
-    // parse_line() will parse the quoted auth type and streq() will
-    // validate it. If our quoting is wrong, OpenVPN responds with
-    // ERROR.
-    client
-        .send(OvpnCommand::Username {
-            auth_type: AuthType::Auth,
-            value: Redacted::new("testuser"),
-        })
-        .await
-        .unwrap();
-    client
-        .send(OvpnCommand::Password {
-            auth_type: AuthType::Auth,
-            value: Redacted::new("testpass"),
-        })
-        .await
-        .unwrap();
-
-    // If the wire format was accepted, we should see state transitions
-    // (AUTH, GET_CONFIG, etc.) rather than an ERROR response.
-    let mut saw_state = false;
-    timeout(Duration::from_secs(5), async {
-        loop {
-            let msg = common::recv_raw(&mut client).await;
-            match msg {
-                OvpnMessage::Error(e) => {
-                    panic!("password wire format rejected by OpenVPN: {e}");
-                }
-                OvpnMessage::Notification(Notification::State { .. }) => {
-                    saw_state = true;
-                }
-                _ => {}
-            }
-        }
-    })
-    .await
-    .ok();
-
-    assert!(
-        saw_state,
-        "should observe state transitions after credentials"
-    );
-    client.send(OvpnCommand::Exit).await.unwrap();
-}
+// Password wire-format acceptance (Username/Password command encoding)
+// is covered by conformance_password.rs, which exercises the same
+// encoder path against the same openvpn-client-password container.
+// Running both tests in CI against shared single-client management
+// interfaces causes state conflicts (hold already released, credentials
+// already supplied), so the test lives in one place only.
