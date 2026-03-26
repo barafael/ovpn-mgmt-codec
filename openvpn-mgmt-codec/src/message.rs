@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::auth::AuthType;
@@ -91,11 +92,11 @@ pub enum Notification {
         cid: u64,
         /// Key ID (present for CONNECT/REAUTH, absent for ESTABLISHED/DISCONNECT).
         kid: Option<u64>,
-        /// Accumulated ENV pairs, in order. Each `>CLIENT:ENV,key=val` line
-        /// becomes one `(key, val)` entry. The terminating `>CLIENT:ENV,END`
-        /// is consumed but not included.
+        /// Accumulated ENV map. Each `>CLIENT:ENV,key=val` line becomes one
+        /// entry. The terminating `>CLIENT:ENV,END` is consumed but not
+        /// included. If a key appears more than once, the last value wins.
         #[debug("{:?}", RedactedEnv(env))]
-        env: Vec<(String, String)>,
+        env: BTreeMap<String, String>,
     },
 
     /// A single-line `>CLIENT:ADDRESS` notification.
@@ -283,11 +284,11 @@ pub enum Notification {
 /// Helper for Debug output: displays env entries, masking sensitive keys.
 /// Constructed by `derive_more::Debug` on [`Notification::Client::env`].
 #[allow(dead_code)] // used via derive_more::Debug attribute
-struct RedactedEnv<'a>(&'a [(String, String)]);
+struct RedactedEnv<'a>(&'a BTreeMap<String, String>);
 
 impl fmt::Debug for RedactedEnv<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_list()
+        f.debug_map()
             .entries(self.0.iter().map(|(k, v)| {
                 if SENSITIVE_ENV_KEYS.contains(&k.as_str()) {
                     (k.as_str(), "<redacted>")
@@ -311,10 +312,10 @@ mod tests {
             event: ClientEvent::Connect,
             cid: 1,
             kid: Some(0),
-            env: vec![
+            env: BTreeMap::from([
                 ("common_name".to_string(), "alice".to_string()),
                 ("password".to_string(), "s3cret".to_string()),
-            ],
+            ]),
         };
         let dbg = format!("{notification:?}");
         assert!(dbg.contains("alice"), "non-sensitive values should appear");
@@ -334,7 +335,7 @@ mod tests {
             event: ClientEvent::Disconnect,
             cid: 5,
             kid: None,
-            env: vec![("untrusted_ip".to_string(), "10.0.0.1".to_string())],
+            env: BTreeMap::from([("untrusted_ip".to_string(), "10.0.0.1".to_string())]),
         };
         let dbg = format!("{notification:?}");
         assert!(dbg.contains("10.0.0.1"));

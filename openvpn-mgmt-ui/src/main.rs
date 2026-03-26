@@ -27,8 +27,8 @@ pub(crate) const SPACE_MONO: Font = Font::with_name("Space Mono");
 use tokio::sync::mpsc;
 
 use openvpn_mgmt_codec::{
-    AuthRetryMode, KillTarget, LoadStats, LogLevel, Notification, OpenVpnState, OvpnCommand,
-    OvpnMessage, PasswordNotification, Redacted, Signal, StatusFormat, StreamMode,
+    AuthRetryMode, ClientDeny, KillTarget, LoadStats, LogLevel, Notification, OpenVpnState,
+    OvpnCommand, OvpnMessage, PasswordNotification, Redacted, Signal, StatusFormat, StreamMode,
 };
 
 use actor::{ActorCommand, ActorEvent};
@@ -614,16 +614,15 @@ impl App {
                 let mut rng = rand::rng();
                 let ds = &mut self.demo_state;
                 // Random walk with mean-reversion: rates drift smoothly.
-                ds.rate_in += (200_000.0 - ds.rate_in) * 0.05
-                    + rng.random_range(-40_000.0f64..40_000.0);
-                ds.rate_out += (80_000.0 - ds.rate_out) * 0.05
-                    + rng.random_range(-15_000.0f64..15_000.0);
+                ds.rate_in +=
+                    (200_000.0 - ds.rate_in) * 0.05 + rng.random_range(-40_000.0f64..40_000.0);
+                ds.rate_out +=
+                    (80_000.0 - ds.rate_out) * 0.05 + rng.random_range(-15_000.0f64..15_000.0);
                 ds.rate_in = ds.rate_in.max(1000.0);
                 ds.rate_out = ds.rate_out.max(500.0);
                 ds.cumulative_in += ds.rate_in as u64;
                 ds.cumulative_out += ds.rate_out as u64;
-                self.throughput
-                    .push(ds.cumulative_in, ds.cumulative_out, 1);
+                self.throughput.push(ds.cumulative_in, ds.cumulative_out, 1);
                 self.bytes_in = ds.cumulative_in;
                 self.bytes_out = ds.cumulative_out;
             }
@@ -677,7 +676,7 @@ impl App {
     }
 
     fn handle_notification(&mut self, notification: Notification) {
-        match notification{
+        match notification {
             Notification::State {
                 timestamp,
                 name,
@@ -762,14 +761,13 @@ impl App {
             } => {
                 // Extract common_name from env if present.
                 let common_name = env
-                    .iter()
-                    .find(|(key, _)| key == "common_name")
-                    .map(|(_, val)| val.clone())
+                    .get("common_name")
+                    .cloned()
                     .unwrap_or_else(|| format!("{event}"));
                 let address = env
-                    .iter()
-                    .find(|(key, _)| key == "untrusted_ip" || key == "IV_IP")
-                    .map(|(_, val)| val.clone())
+                    .get("untrusted_ip")
+                    .or_else(|| env.get("IV_IP"))
+                    .cloned()
                     .unwrap_or_default();
 
                 let kid_label = kid.map_or(String::new(), |kid_val| format!(" kid={kid_val}"));
@@ -803,7 +801,7 @@ impl App {
                     &format!("Client address cid={cid} addr={addr} primary={primary}"),
                 );
             }
-            Notification::Password(password_notification) => match password_notification{
+            Notification::Password(password_notification) => match password_notification {
                 PasswordNotification::NeedAuth { auth_type } => {
                     self.add_log(
                         LogLevel::Warning,
@@ -1069,15 +1067,14 @@ impl App {
                     self.ops.client_kid.parse::<u64>(),
                 ) {
                     let reason = self.ops.client_deny_reason.clone();
-                    let client_reason = None;
                     self.send_and_record(
                         &format!("client-deny {cid} {kid} {reason}"),
-                        OvpnCommand::ClientDeny {
+                        OvpnCommand::ClientDeny(ClientDeny {
                             cid,
                             kid,
                             reason,
-                            client_reason,
-                        },
+                            client_reason: None,
+                        }),
                     )?;
                 }
             }
@@ -1280,7 +1277,9 @@ impl App {
             commands.push(OvpnCommand::Log(self.startup.log.to_stream_mode()));
         }
         if self.startup.state != StartupStreamMode::Off {
-            commands.push(OvpnCommand::StateStream(self.startup.state.to_stream_mode()));
+            commands.push(OvpnCommand::StateStream(
+                self.startup.state.to_stream_mode(),
+            ));
         }
         if self.startup.echo != StartupStreamMode::Off {
             commands.push(OvpnCommand::Echo(self.startup.echo.to_stream_mode()));
@@ -1400,7 +1399,11 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let month_offset = (5 * doy + 2) / 153;
     let day = doy - (153 * month_offset + 2) / 5 + 1;
-    let month = if month_offset < 10 { month_offset + 3 } else { month_offset - 9 };
+    let month = if month_offset < 10 {
+        month_offset + 3
+    } else {
+        month_offset - 9
+    };
     let year = if month <= 2 { year + 1 } else { year };
     (year, month, day)
 }

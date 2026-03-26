@@ -5,7 +5,7 @@
 //! full async path including buffering, backpressure, and stream termination.
 
 use futures::{SinkExt, StreamExt};
-use openvpn_mgmt_codec::stream::{ManagementEvent, classify};
+use openvpn_mgmt_codec::stream::{ClassifyExt, ManagementEvent};
 use openvpn_mgmt_codec::*;
 use tokio::io::{AsyncWriteExt, duplex};
 use tokio_util::codec::Framed;
@@ -96,7 +96,7 @@ async fn framed_classify_stream_adapter() {
     // Split and classify
     let (sink, raw_stream) = framed.split();
     let events: Vec<ManagementEvent> = raw_stream
-        .map(classify)
+        .classify()
         .take(2)
         .collect::<Vec<_>>()
         .await

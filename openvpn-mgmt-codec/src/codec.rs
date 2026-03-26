@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::VecDeque, io};
+use std::{borrow::Cow, collections::BTreeMap, collections::VecDeque, io};
 
 use bytes::{Buf, BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
@@ -116,7 +116,7 @@ struct ClientNotificationAccumulator {
     event: ClientEvent,
     cid: u64,
     kid: Option<u64>,
-    env: Vec<(String, String)>,
+    env: BTreeMap<String, String>,
 }
 
 /// Controls how many items the decoder will accumulate in a multi-line
@@ -394,7 +394,8 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 ref password_b64,
                 ref response_b64,
             } => {
-                let password = wire_safe(password_b64.expose(), "static-challenge password_b64", mode)?;
+                let password =
+                    wire_safe(password_b64.expose(), "static-challenge password_b64", mode)?;
                 let resp = wire_safe(response_b64.expose(), "static-challenge response_b64", mode)?;
                 let value = format!("SCRV1:{password}:{resp}");
                 let escaped = quote(&escape(&value));
@@ -475,20 +476,29 @@ impl Encoder<OvpnCommand> for OvpnCodec {
                 write_line(dst, &format!("client-auth-nt {cid} {kid}"));
             }
 
-            OvpnCommand::ClientDeny {
-                cid,
-                kid,
-                ref reason,
-                ref client_reason,
-            } => {
-                let reason_quoted = quote(&escape(&wire_safe(reason, "client-deny reason", mode)?));
-                match client_reason {
-                    Some(client_reason_str) => {
-                        let options = wire_safe(client_reason_str, "client-deny client_reason", mode)?;
+            OvpnCommand::ClientDeny(ref deny) => {
+                let reason_quoted = quote(&escape(&wire_safe(
+                    &deny.reason,
+                    "client-deny reason",
+                    mode,
+                )?));
+                match deny.client_reason {
+                    Some(ref client_reason_str) => {
+                        let options =
+                            wire_safe(client_reason_str, "client-deny client_reason", mode)?;
                         let client_reason_quoted = quote(&escape(&options));
-                        write_line(dst, &format!("client-deny {cid} {kid} {reason_quoted} {client_reason_quoted}"));
+                        write_line(
+                            dst,
+                            &format!(
+                                "client-deny {} {} {reason_quoted} {client_reason_quoted}",
+                                deny.cid, deny.kid
+                            ),
+                        );
                     }
-                    None => write_line(dst, &format!("client-deny {cid} {kid} {reason_quoted}")),
+                    None => write_line(
+                        dst,
+                        &format!("client-deny {} {} {reason_quoted}", deny.cid, deny.kid),
+                    ),
                 }
             }
 
@@ -738,7 +748,7 @@ impl Decoder for OvpnCodec {
                         self.max_client_env_entries,
                         "client ENV",
                     )?;
-                    accum.env.push((k, v));
+                    accum.env.insert(k, v);
                     continue; // Next line.
                 }
             }
@@ -913,7 +923,7 @@ impl OvpnCodec {
                 event: parsed_event,
                 cid,
                 kid,
-                env: Vec::new(),
+                env: BTreeMap::new(),
             });
             return None; // Signal to the caller to keep reading.
         }
@@ -976,8 +986,11 @@ fn parse_optional_port(input: &str) -> Option<u16> {
     if trimmed.is_empty() {
         return None;
     }
-    trimmed.parse()
-        .inspect_err(|error| warn!(%error, port = trimmed, "non-numeric port in STATE notification"))
+    trimmed
+        .parse()
+        .inspect_err(
+            |error| warn!(%error, port = trimmed, "non-numeric port in STATE notification"),
+        )
         .ok()
 }
 
@@ -1252,8 +1265,9 @@ mod tests {
     use super::*;
 
     use crate::{
-        auth::AuthType, client_event::ClientEvent, message::PasswordNotification, signal::Signal,
-        status_format::StatusFormat, stream_mode::StreamMode,
+        auth::AuthType, client_deny::ClientDeny, client_event::ClientEvent,
+        message::PasswordNotification, signal::Signal, status_format::StatusFormat,
+        stream_mode::StreamMode,
     };
 
     use bytes::BytesMut;
@@ -1385,12 +1399,12 @@ mod tests {
 
     #[test]
     fn encode_client_deny_with_client_reason() {
-        let wire = encode_to_string(OvpnCommand::ClientDeny {
+        let wire = encode_to_string(OvpnCommand::ClientDeny(ClientDeny {
             cid: 5,
             kid: 0,
             reason: "cert revoked".to_string(),
             client_reason: Some("Your access has been revoked.".to_string()),
-        });
+        }));
         assert_eq!(
             wire,
             "client-deny 5 0 \"cert revoked\" \"Your access has been revoked.\"\n"
@@ -1700,8 +1714,8 @@ mod tests {
                 kid: Some(1),
                 env,
             }) if env.len() == 2
-                && env[0] == ("untrusted_ip".to_string(), "1.2.3.4".to_string())
-                && env[1] == ("common_name".to_string(), "TestClient".to_string())
+                && env.get("untrusted_ip").map(String::as_str) == Some("1.2.3.4")
+                && env.get("common_name").map(String::as_str) == Some("TestClient")
         ));
     }
 

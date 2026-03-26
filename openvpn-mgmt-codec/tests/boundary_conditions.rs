@@ -1,8 +1,10 @@
 //! Boundary condition tests: accumulation limits, FromStr/Display edge
 //! cases, CRLF line endings, and classify exhaustiveness.
 
+use std::collections::BTreeMap;
+
 use bytes::BytesMut;
-use openvpn_mgmt_codec::stream::{ManagementEvent, classify};
+use openvpn_mgmt_codec::stream::ManagementEvent;
 use openvpn_mgmt_codec::*;
 use tokio_util::codec::{Decoder, Encoder};
 
@@ -396,82 +398,82 @@ fn mixed_lf_and_crlf_in_same_stream() {
 }
 
 // ---  ---
-// classify exhaustiveness
+// ManagementEvent::from exhaustiveness
 // ---  ---
 
 #[test]
 fn classify_success() {
-    let result = classify(Ok(OvpnMessage::Success("ok".to_string())));
+    let event = ManagementEvent::from(OvpnMessage::Success("ok".to_string()));
     assert!(matches!(
-        result.unwrap(),
+        event,
         ManagementEvent::Response(OvpnMessage::Success(_))
     ));
 }
 
 #[test]
 fn classify_error() {
-    let result = classify(Ok(OvpnMessage::Error("fail".to_string())));
+    let event = ManagementEvent::from(OvpnMessage::Error("fail".to_string()));
     assert!(matches!(
-        result.unwrap(),
+        event,
         ManagementEvent::Response(OvpnMessage::Error(_))
     ));
 }
 
 #[test]
 fn classify_multiline() {
-    let result = classify(Ok(OvpnMessage::MultiLine(vec!["a".to_string()])));
+    let event = ManagementEvent::from(OvpnMessage::MultiLine(vec!["a".to_string()]));
     assert!(matches!(
-        result.unwrap(),
+        event,
         ManagementEvent::Response(OvpnMessage::MultiLine(_))
     ));
 }
 
 #[test]
 fn classify_info() {
-    let result = classify(Ok(OvpnMessage::Info("banner".to_string())));
+    let event = ManagementEvent::from(OvpnMessage::Info("banner".to_string()));
     assert!(matches!(
-        result.unwrap(),
+        event,
         ManagementEvent::Response(OvpnMessage::Info(_))
     ));
 }
 
 #[test]
 fn classify_password_prompt() {
-    let result = classify(Ok(OvpnMessage::PasswordPrompt));
+    let event = ManagementEvent::from(OvpnMessage::PasswordPrompt);
     assert!(matches!(
-        result.unwrap(),
+        event,
         ManagementEvent::Response(OvpnMessage::PasswordPrompt)
     ));
 }
 
 #[test]
 fn classify_unrecognized() {
-    let result = classify(Ok(OvpnMessage::Unrecognized {
+    let event = ManagementEvent::from(OvpnMessage::Unrecognized {
         line: "garbage".to_string(),
         kind: UnrecognizedKind::UnexpectedLine,
-    }));
+    });
     assert!(matches!(
-        result.unwrap(),
+        event,
         ManagementEvent::Response(OvpnMessage::Unrecognized { .. })
     ));
 }
 
 #[test]
 fn classify_pkcs11_id_entry() {
-    let result = classify(Ok(OvpnMessage::Pkcs11IdEntry {
+    let event = ManagementEvent::from(OvpnMessage::Pkcs11IdEntry {
         index: "0".to_string(),
         id: "id".to_string(),
         blob: "blob".to_string(),
-    }));
+    });
     assert!(matches!(
-        result.unwrap(),
+        event,
         ManagementEvent::Response(OvpnMessage::Pkcs11IdEntry { .. })
     ));
 }
 
 #[test]
 fn classify_notification_state() {
-    let result = classify(Ok(OvpnMessage::Notification(Notification::State {
+    let event = ManagementEvent::from(OvpnMessage::Notification(Notification::State {
         timestamp: 0,
         name: OpenVpnState::Connected,
         description: String::new(),
@@ -481,76 +483,70 @@ fn classify_notification_state() {
         local_addr: String::new(),
         local_port: None,
         local_ipv6: String::new(),
-    })));
+    }));
     assert!(matches!(
-        result.unwrap(),
+        event,
         ManagementEvent::Notification(Notification::State { .. })
     ));
 }
 
 #[test]
 fn classify_notification_client() {
-    let result = classify(Ok(OvpnMessage::Notification(Notification::Client {
+    let event = ManagementEvent::from(OvpnMessage::Notification(Notification::Client {
         event: ClientEvent::Connect,
         cid: 1,
         kid: Some(0),
-        env: vec![],
-    })));
+        env: BTreeMap::new(),
+    }));
     assert!(matches!(
-        result.unwrap(),
+        event,
         ManagementEvent::Notification(Notification::Client { .. })
     ));
 }
 
 #[test]
 fn classify_notification_hold() {
-    let result = classify(Ok(OvpnMessage::Notification(Notification::Hold {
+    let event = ManagementEvent::from(OvpnMessage::Notification(Notification::Hold {
         text: "waiting".to_string(),
-    })));
+    }));
     assert!(matches!(
-        result.unwrap(),
+        event,
         ManagementEvent::Notification(Notification::Hold { .. })
     ));
 }
 
 #[test]
 fn classify_notification_fatal() {
-    let result = classify(Ok(OvpnMessage::Notification(Notification::Fatal {
+    let event = ManagementEvent::from(OvpnMessage::Notification(Notification::Fatal {
         message: "crash".to_string(),
-    })));
+    }));
     assert!(matches!(
-        result.unwrap(),
+        event,
         ManagementEvent::Notification(Notification::Fatal { .. })
     ));
 }
 
 #[test]
 fn classify_notification_password() {
-    let result = classify(Ok(OvpnMessage::Notification(Notification::Password(
+    let event = ManagementEvent::from(OvpnMessage::Notification(Notification::Password(
         PasswordNotification::NeedAuth {
             auth_type: AuthType::Auth,
         },
-    ))));
+    )));
     assert!(matches!(
-        result.unwrap(),
+        event,
         ManagementEvent::Notification(Notification::Password(_))
     ));
 }
 
 #[test]
 fn classify_notification_simple_fallback() {
-    let result = classify(Ok(OvpnMessage::Notification(Notification::Simple {
+    let event = ManagementEvent::from(OvpnMessage::Notification(Notification::Simple {
         kind: "FUTURE".to_string(),
         payload: "data".to_string(),
-    })));
+    }));
     assert!(matches!(
-        result.unwrap(),
+        event,
         ManagementEvent::Notification(Notification::Simple { .. })
     ));
-}
-
-#[test]
-fn classify_io_error_passes_through() {
-    let result = classify(Err(std::io::Error::other("boom")));
-    assert!(result.is_err());
 }

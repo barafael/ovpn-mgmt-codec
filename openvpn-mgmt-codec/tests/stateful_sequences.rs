@@ -318,12 +318,12 @@ fn client_auth_then_client_deny_sequence() {
     // Deny
     let msgs = roundtrip(
         &mut c,
-        OvpnCommand::ClientDeny {
+        OvpnCommand::ClientDeny(ClientDeny {
             cid: 11,
             kid: 0,
             reason: "unauthorized".to_string(),
             client_reason: Some("access denied".to_string()),
-        },
+        }),
         "SUCCESS: client-deny succeeded\n",
     );
     assert_eq!(msgs.len(), 1);

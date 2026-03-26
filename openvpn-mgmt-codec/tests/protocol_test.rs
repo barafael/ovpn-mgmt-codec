@@ -166,7 +166,11 @@ fn status_v2_with_headers() {
     match &msgs[0] {
         OvpnMessage::MultiLine(lines) => {
             assert!(lines[0].starts_with("HEADER,CLIENT_LIST"));
-            assert!(lines.iter().any(|line| line.starts_with("CLIENT_LIST,client1")));
+            assert!(
+                lines
+                    .iter()
+                    .any(|line| line.starts_with("CLIENT_LIST,client1"))
+            );
             assert!(lines.iter().any(|line| line.starts_with("ROUTING_TABLE,")));
             assert!(lines.iter().any(|line| line.starts_with("GLOBAL_STATS,")));
         }
@@ -202,7 +206,11 @@ fn status_v1_client_mode() {
     match &msgs[0] {
         OvpnMessage::MultiLine(lines) => {
             assert_eq!(lines[0], "OpenVPN STATISTICS");
-            assert!(lines.iter().any(|line| line.starts_with("TUN/TAP read bytes")));
+            assert!(
+                lines
+                    .iter()
+                    .any(|line| line.starts_with("TUN/TAP read bytes"))
+            );
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -402,11 +410,13 @@ fn client_connect_full_env() {
             assert_eq!(*cid, 0);
             assert_eq!(*kid, Some(1));
             assert_eq!(env.len(), 19);
-            assert_eq!(env[0], ("untrusted_ip".into(), "203.0.113.50".into()));
-            assert_eq!(env[2], ("common_name".into(), "client1.example.com".into()));
-            assert_eq!(env[3], ("username".into(), "jdoe".into()));
-            let ciphers = env.iter().find(|(k, _)| k == "IV_CIPHERS").unwrap();
-            assert_eq!(ciphers.1, "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305");
+            assert_eq!(env["untrusted_ip"], "203.0.113.50");
+            assert_eq!(env["common_name"], "client1.example.com");
+            assert_eq!(env["username"], "jdoe");
+            assert_eq!(
+                env["IV_CIPHERS"],
+                "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305"
+            );
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -449,11 +459,7 @@ fn client_established() {
             assert_eq!(*cid, 0);
             assert_eq!(*kid, None);
             assert_eq!(env.len(), 3);
-            let pool_ip = env
-                .iter()
-                .find(|(k, _)| k == "ifconfig_pool_remote_ip")
-                .unwrap();
-            assert_eq!(pool_ip.1, "10.8.0.6");
+            assert_eq!(env["ifconfig_pool_remote_ip"], "10.8.0.6");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -475,8 +481,7 @@ fn client_disconnect_with_stats() {
             assert_eq!(*cid, 5);
             assert_eq!(*kid, None);
             assert_eq!(env.len(), 5);
-            let duration = env.iter().find(|(k, _)| k == "time_duration").unwrap();
-            assert_eq!(duration.1, "18432");
+            assert_eq!(env["time_duration"], "18432");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -515,9 +520,9 @@ fn multiple_client_events_sequential() {
             }),
         ) => {
             assert_eq!(*cid0, 0);
-            assert_eq!(env0[0].1, "alice");
+            assert_eq!(env0["common_name"], "alice");
             assert_eq!(*cid1, 1);
-            assert_eq!(env1[0].1, "bob");
+            assert_eq!(env1["common_name"], "bob");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -928,12 +933,12 @@ fn encode_client_auth_nt() {
 
 #[test]
 fn encode_client_deny_no_client_reason() {
-    let wire = encode_to_string(OvpnCommand::ClientDeny {
+    let wire = encode_to_string(OvpnCommand::ClientDeny(ClientDeny {
         cid: 3,
         kid: 0,
         reason: "policy violation".into(),
         client_reason: None,
-    });
+    }));
     assert_eq!(wire, "client-deny 3 0 \"policy violation\"\n");
 }
 
@@ -1057,12 +1062,12 @@ fn success_responses() {
     assert!(matches!(&msgs[0], OvpnMessage::Success(_)));
 
     let msgs = encode_then_decode(
-        OvpnCommand::ClientDeny {
+        OvpnCommand::ClientDeny(ClientDeny {
             cid: 0,
             kid: 1,
             reason: "denied".into(),
             client_reason: None,
-        },
+        }),
         "SUCCESS: client-deny command succeeded\n",
     );
     assert!(matches!(&msgs[0], OvpnMessage::Success(_)));
@@ -1098,12 +1103,12 @@ fn error_responses() {
     assert!(matches!(&msgs[0], OvpnMessage::Error(s) if s.contains("not found")));
 
     let msgs = encode_then_decode(
-        OvpnCommand::ClientDeny {
+        OvpnCommand::ClientDeny(ClientDeny {
             cid: 999,
             kid: 0,
             reason: "denied".into(),
             client_reason: None,
-        },
+        }),
         "ERROR: client-deny command failed\n",
     );
     assert!(matches!(&msgs[0], OvpnMessage::Error(_)));
@@ -1205,8 +1210,7 @@ fn env_value_containing_equals() {
     assert_eq!(msgs.len(), 1);
     match &msgs[0] {
         OvpnMessage::Notification(Notification::Client { env, .. }) => {
-            assert_eq!(env[0].0, "tls_digest_sha256_0");
-            assert_eq!(env[0].1, "aa:bb:cc=dd");
+            assert_eq!(env["tls_digest_sha256_0"], "aa:bb:cc=dd");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -1222,8 +1226,7 @@ fn env_key_with_no_value() {
     assert_eq!(msgs.len(), 1);
     match &msgs[0] {
         OvpnMessage::Notification(Notification::Client { env, .. }) => {
-            assert_eq!(env[0].0, "empty_key");
-            assert_eq!(env[0].1, "");
+            assert_eq!(env["empty_key"], "");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -1437,7 +1440,7 @@ fn partial_client_env_block() {
     match msg {
         OvpnMessage::Notification(Notification::Client { env, .. }) => {
             assert_eq!(env.len(), 1);
-            assert_eq!(env[0].1, "alice");
+            assert_eq!(env["common_name"], "alice");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -1650,7 +1653,10 @@ fn status_v1_server_empty_no_clients() {
                 .iter()
                 .position(|line| line.starts_with("Common Name,"))
                 .unwrap();
-            let routing_idx = lines.iter().position(|line| line =="ROUTING TABLE").unwrap();
+            let routing_idx = lines
+                .iter()
+                .position(|line| line == "ROUTING TABLE")
+                .unwrap();
             assert_eq!(
                 client_header_idx + 1,
                 routing_idx,
@@ -1706,7 +1712,11 @@ fn status_v2_full_with_title_time_dco() {
             // DCO stats
             assert!(lines.iter().any(|line| line.contains("dco_enabled")));
             // IPv6 routing entry
-            assert!(lines.iter().any(|line| line.starts_with("ROUTING_TABLE,2002:")));
+            assert!(
+                lines
+                    .iter()
+                    .any(|line| line.starts_with("ROUTING_TABLE,2002:"))
+            );
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -1741,10 +1751,26 @@ fn status_v1_client_full_with_compression_stats() {
         OvpnMessage::MultiLine(lines) => {
             assert_eq!(lines[0], "OpenVPN STATISTICS");
             // Should include compression stats
-            assert!(lines.iter().any(|line| line.starts_with("pre-compress bytes")));
-            assert!(lines.iter().any(|line| line.starts_with("post-compress bytes")));
-            assert!(lines.iter().any(|line| line.starts_with("pre-decompress bytes")));
-            assert!(lines.iter().any(|line| line.starts_with("post-decompress bytes")));
+            assert!(
+                lines
+                    .iter()
+                    .any(|line| line.starts_with("pre-compress bytes"))
+            );
+            assert!(
+                lines
+                    .iter()
+                    .any(|line| line.starts_with("post-compress bytes"))
+            );
+            assert!(
+                lines
+                    .iter()
+                    .any(|line| line.starts_with("pre-decompress bytes"))
+            );
+            assert!(
+                lines
+                    .iter()
+                    .any(|line| line.starts_with("post-decompress bytes"))
+            );
             assert!(lines.iter().any(|line| line.starts_with("Auth read bytes")));
         }
         other => panic!("unexpected: {other:?}"),
@@ -1795,7 +1821,11 @@ fn help_response_2_6_9_with_newer_commands() {
             assert!(lines.len() > 30, "2.6.9 help should be extensive");
             // New commands not in older versions
             assert!(lines.iter().any(|line| line.contains("cr-response")));
-            assert!(lines.iter().any(|line| line.contains("client-pending-auth")));
+            assert!(
+                lines
+                    .iter()
+                    .any(|line| line.contains("client-pending-auth"))
+            );
             assert!(lines.iter().any(|line| line.contains("pk-sig")));
             assert!(lines.iter().any(|line| line.contains("certificate")));
             assert!(lines.iter().any(|line| line.contains("load-stats")));
@@ -2086,30 +2116,23 @@ fn client_connect_tls_rich_env() {
             // Should have 22 env vars (rich TLS set)
             assert_eq!(env.len(), 22);
             // X509 fields
-            assert!(
-                env.iter()
-                    .any(|(k, v)| k == "X509_0_CN" && v == "client_two")
-            );
-            assert!(env.iter().any(|(k, v)| k == "X509_0_C" && v == "DE"));
+            assert_eq!(env["X509_0_CN"], "client_two");
+            assert_eq!(env["X509_0_C"], "DE");
             // TLS digest
-            assert!(env.iter().any(|(k, _)| k == "tls_digest_0"));
-            assert!(env.iter().any(|(k, _)| k == "tls_digest_sha256_0"));
+            assert!(env.contains_key("tls_digest_0"));
+            assert!(env.contains_key("tls_digest_sha256_0"));
             // SSO capabilities
-            let sso = env.iter().find(|(k, _)| k == "IV_SSO").unwrap();
-            assert_eq!(sso.1, "webauth,openurl,crtext");
+            assert_eq!(env["IV_SSO"], "webauth,openurl,crtext");
             // Hex serial
-            assert!(
-                env.iter()
-                    .any(|(k, v)| k == "tls_serial_hex_0" && v == "37:83")
-            );
+            assert_eq!(env["tls_serial_hex_0"], "37:83");
             // CA cert info (chain depth 1)
-            assert!(env.iter().any(|(k, _)| k == "tls_serial_1"));
-            assert!(env.iter().any(|(k, _)| k == "tls_digest_1"));
+            assert!(env.contains_key("tls_serial_1"));
+            assert!(env.contains_key("tls_digest_1"));
             // n_clients
-            assert!(env.iter().any(|(k, v)| k == "n_clients" && v == "0"));
+            assert_eq!(env["n_clients"], "0");
             // Empty values for username/password
-            assert!(env.iter().any(|(k, v)| k == "username" && v.is_empty()));
-            assert!(env.iter().any(|(k, v)| k == "password" && v.is_empty()));
+            assert_eq!(env["username"], "");
+            assert_eq!(env["password"], "");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -2136,7 +2159,7 @@ fn client_cr_response_event() {
             assert_eq!(*cid, 1);
             assert_eq!(*kid, Some(2));
             assert_eq!(env.len(), 3);
-            assert!(env.iter().any(|(k, v)| k == "common_name" && v == "test"));
+            assert_eq!(env["common_name"], "test");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -2722,12 +2745,12 @@ fn server_mode_deny_then_accept_session() {
     enc_buf.clear();
     codec
         .encode(
-            OvpnCommand::ClientDeny {
+            OvpnCommand::ClientDeny(ClientDeny {
                 cid: 0,
                 kid: 1,
                 reason: "certificate revoked".into(),
                 client_reason: Some("Your access has been revoked".into()),
-            },
+            }),
             &mut enc_buf,
         )
         .unwrap();
@@ -2774,10 +2797,7 @@ fn server_mode_deny_then_accept_session() {
     match &msg {
         OvpnMessage::Notification(Notification::Client { event, env, .. }) => {
             assert_eq!(*event, ClientEvent::Established);
-            assert!(
-                env.iter()
-                    .any(|(k, v)| k == "ifconfig_pool_remote_ip" && v == "10.8.0.10")
-            );
+            assert_eq!(env["ifconfig_pool_remote_ip"], "10.8.0.10");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -2940,7 +2960,7 @@ fn crlf_in_client_notification() {
     assert_eq!(msgs.len(), 1);
     match &msgs[0] {
         OvpnMessage::Notification(Notification::Client { env, .. }) => {
-            assert_eq!(env[0].1, "test");
+            assert_eq!(env["common_name"], "test");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -2992,7 +3012,7 @@ fn partial_multiline_client_env_split() {
     match msg {
         OvpnMessage::Notification(Notification::Client { env, .. }) => {
             assert_eq!(env.len(), 2);
-            assert_eq!(env[0], ("untrusted_ip".into(), "203.0.113.50".into()));
+            assert_eq!(env["untrusted_ip"], "203.0.113.50");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -3080,12 +3100,12 @@ fn encode_needstr_with_quotes() {
 
 #[test]
 fn encode_client_deny_with_both_reasons() {
-    let wire = encode_to_string(OvpnCommand::ClientDeny {
+    let wire = encode_to_string(OvpnCommand::ClientDeny(ClientDeny {
         cid: 5,
         kid: 0,
         reason: "cert revoked".into(),
         client_reason: Some("Your access has been revoked.".into()),
-    });
+    }));
     assert_eq!(
         wire,
         "client-deny 5 0 \"cert revoked\" \"Your access has been revoked.\"\n"

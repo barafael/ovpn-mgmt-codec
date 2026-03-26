@@ -3,6 +3,7 @@ use std::str::FromStr;
 
 use crate::{
     auth::{AuthRetryMode, AuthType, ParseAuthRetryModeError},
+    client_deny::ClientDeny,
     kill_target::KillTarget,
     need_ok::NeedOkResponse,
     proxy_action::ProxyAction,
@@ -342,16 +343,7 @@ pub enum OvpnCommand {
 
     /// Deny a `>CLIENT:CONNECT` or `>CLIENT:REAUTH`.
     /// Wire: `client-deny {CID} {KID} "reason" ["client-reason"]`
-    ClientDeny {
-        /// Client ID.
-        cid: u64,
-        /// Key ID.
-        kid: u64,
-        /// Server-side reason string (logged but not sent to client).
-        reason: String,
-        /// Optional message sent to the client as part of AUTH_FAILED.
-        client_reason: Option<String>,
-    },
+    ClientDeny(ClientDeny),
 
     /// Kill a client session by CID, optionally with a custom message.
     /// Wire: `client-kill {CID}` or `client-kill {CID} {message}`
@@ -829,12 +821,12 @@ impl FromStr for OvpnCommand {
                     "usage: client-deny <cid> <kid> <reason> [client-reason]",
                 ))?;
                 let client_reason = next_token(rest).map(|(cr, _)| cr);
-                Ok(Self::ClientDeny {
+                Ok(Self::ClientDeny(ClientDeny {
                     cid,
                     kid,
                     reason,
                     client_reason,
-                })
+                }))
             }
 
             "client-kill" => {
@@ -1102,6 +1094,48 @@ pub fn connection_sequence(bytecount_interval: u32) -> Vec<OvpnCommand> {
         OvpnCommand::Log(StreamMode::OnAll),
         OvpnCommand::StateStream(StreamMode::OnAll),
         OvpnCommand::Pid,
+    ];
+    if bytecount_interval > 0 {
+        cmds.push(OvpnCommand::ByteCount(bytecount_interval));
+    }
+    cmds.push(OvpnCommand::HoldRelease);
+    cmds
+}
+
+/// Standard startup sequence for **server-mode** management clients.
+///
+/// Returns the commands that a management program typically sends when
+/// OpenVPN connects with `--management-client`. This covers the same
+/// basics as [`connection_sequence`] (log/state streaming, PID, bytecount,
+/// hold release) and additionally sets the `>CLIENT:ENV` filter level so
+/// that client notifications include the desired set of environment
+/// variables.
+///
+/// # Arguments
+///
+/// * `bytecount_interval` — seconds between `>BYTECOUNT_CLI:` notifications
+///   (0 to disable).
+/// * `env_filter` — ENV filter level for `>CLIENT:ENV` blocks. Level 0
+///   sends all variables; higher levels progressively filter.
+///
+/// # Example
+///
+/// ```
+/// use openvpn_mgmt_codec::command::server_connection_sequence;
+/// use openvpn_mgmt_codec::OvpnCommand;
+///
+/// let cmds = server_connection_sequence(5, 0);
+///
+/// // Contains env-filter for server-mode client notifications.
+/// assert!(cmds.iter().any(|cmd| matches!(cmd, OvpnCommand::EnvFilter(0))));
+/// assert!(cmds.iter().any(|cmd| matches!(cmd, OvpnCommand::HoldRelease)));
+/// ```
+pub fn server_connection_sequence(bytecount_interval: u32, env_filter: u32) -> Vec<OvpnCommand> {
+    let mut cmds = vec![
+        OvpnCommand::Log(StreamMode::OnAll),
+        OvpnCommand::StateStream(StreamMode::OnAll),
+        OvpnCommand::Pid,
+        OvpnCommand::EnvFilter(env_filter),
     ];
     if bytecount_interval > 0 {
         cmds.push(OvpnCommand::ByteCount(bytecount_interval));
@@ -1493,21 +1527,21 @@ mod tests {
     fn parse_client_deny() {
         assert_eq!(
             "client-deny 1 2 rejected".parse(),
-            Ok(OvpnCommand::ClientDeny {
+            Ok(OvpnCommand::ClientDeny(ClientDeny {
                 cid: 1,
                 kid: 2,
                 reason: "rejected".to_string(),
                 client_reason: None,
-            })
+            }))
         );
         assert_eq!(
             "client-deny 1 2 rejected sorry".parse(),
-            Ok(OvpnCommand::ClientDeny {
+            Ok(OvpnCommand::ClientDeny(ClientDeny {
                 cid: 1,
                 kid: 2,
                 reason: "rejected".to_string(),
                 client_reason: Some("sorry".to_string()),
-            })
+            }))
         );
     }
 

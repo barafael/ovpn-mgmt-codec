@@ -75,12 +75,12 @@ fn username_newline_must_not_inject_command() {
 
 #[test]
 fn client_deny_reason_newline_must_not_inject_command() {
-    let wire = encode(OvpnCommand::ClientDeny {
+    let wire = encode(OvpnCommand::ClientDeny(ClientDeny {
         cid: 1,
         kid: 0,
         reason: "banned\nsignal SIGTERM".into(),
         client_reason: None,
-    });
+    }));
 
     let line_count = wire.lines().count();
     assert_eq!(
@@ -92,12 +92,12 @@ fn client_deny_reason_newline_must_not_inject_command() {
 
 #[test]
 fn client_deny_client_reason_newline_must_not_inject_command() {
-    let wire = encode(OvpnCommand::ClientDeny {
+    let wire = encode(OvpnCommand::ClientDeny(ClientDeny {
         cid: 1,
         kid: 0,
         reason: "policy".into(),
         client_reason: Some("sorry\nexit".into()),
-    });
+    }));
 
     let line_count = wire.lines().count();
     assert_eq!(
@@ -615,12 +615,12 @@ fn kill_common_name_null_byte_must_be_stripped() {
 
 #[test]
 fn client_deny_reason_null_byte_must_be_stripped() {
-    let wire = encode(OvpnCommand::ClientDeny {
+    let wire = encode(OvpnCommand::ClientDeny(ClientDeny {
         cid: 1,
         kid: 0,
         reason: "banned\0not really".into(),
         client_reason: None,
-    });
+    }));
 
     assert!(
         !wire.contains('\0'),
@@ -776,12 +776,12 @@ fn strict_username_newline_rejected() {
 #[test]
 fn strict_client_deny_reason_newline_rejected() {
     assert!(
-        try_encode_strict(OvpnCommand::ClientDeny {
+        try_encode_strict(OvpnCommand::ClientDeny(ClientDeny {
             cid: 1,
             kid: 0,
             reason: "banned\nsignal SIGTERM".into(),
             client_reason: None,
-        })
+        }))
         .is_err()
     );
 }
@@ -789,12 +789,12 @@ fn strict_client_deny_reason_newline_rejected() {
 #[test]
 fn strict_client_deny_client_reason_newline_rejected() {
     assert!(
-        try_encode_strict(OvpnCommand::ClientDeny {
+        try_encode_strict(OvpnCommand::ClientDeny(ClientDeny {
             cid: 1,
             kid: 0,
             reason: "policy".into(),
             client_reason: Some("sorry\nexit".into()),
-        })
+        }))
         .is_err()
     );
 }

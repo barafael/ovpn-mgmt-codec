@@ -4,12 +4,16 @@
 
 /// Authentication credential types and retry strategies.
 pub mod auth;
+/// Typed client-deny command with builder support.
+pub mod client_deny;
 /// Client notification event types (CONNECT, REAUTH, etc.).
 pub mod client_event;
 /// The [`OvpnCodec`] encoder/decoder implementation.
 pub mod codec;
 /// Typed management-interface commands ([`OvpnCommand`]).
 pub mod command;
+/// Builder for outgoing CRV1 dynamic-challenge strings.
+pub mod crv1_challenge;
 /// Client kill-target addressing.
 pub mod kill_target;
 /// Log severity levels (Info, Debug, Warning, etc.).
@@ -46,9 +50,11 @@ pub mod unrecognized;
 pub mod version_info;
 
 pub use auth::{AuthRetryMode, AuthType, ParseAuthRetryModeError, ParseAuthTypeError};
+pub use client_deny::ClientDeny;
 pub use client_event::{ClientEvent, ParseClientEventError};
 pub use codec::{AccumulationLimit, EncodeError, EncoderMode, OvpnCodec};
 pub use command::{CommandParseError, OvpnCommand, RemoteEntryRange};
+pub use crv1_challenge::Crv1Challenge;
 pub use kill_target::KillTarget;
 pub use log_level::{LogLevel, ParseLogLevelError};
 pub use message::{Notification, OvpnMessage, PasswordNotification};
@@ -65,10 +71,10 @@ pub use unrecognized::UnrecognizedKind;
 pub use version_info::VersionInfo;
 
 // Re-export key items from sub-modules for convenience.
-pub use command::connection_sequence;
+pub use command::{connection_sequence, server_connection_sequence};
 pub use parsed_response::{LoadStats, ParseResponseError, StateEntry};
 pub use status::{
     ClientStatistics, ConnectedClient, ParseStatusError, RoutingEntry, StatusResponse,
     parse_client_statistics, parse_status,
 };
-pub use stream::{ManagementEvent, classify};
+pub use stream::{ClassifyExt, ManagementEvent};

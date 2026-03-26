@@ -155,7 +155,7 @@ fn client_env_undef_common_name() {
     assert_eq!(msgs.len(), 1);
     match &msgs[0] {
         OvpnMessage::Notification(Notification::Client { env, .. }) => {
-            assert_eq!(env[0], ("common_name".into(), "UNDEF".into()));
+            assert_eq!(env["common_name"], "UNDEF");
         }
         other => panic!("expected Client notification, got: {other:?}"),
     }
@@ -174,7 +174,7 @@ fn client_env_missing_common_name_entirely() {
     assert_eq!(msgs.len(), 1);
     match &msgs[0] {
         OvpnMessage::Notification(Notification::Client { env, .. }) => {
-            assert!(!env.iter().any(|(k, _)| k == "common_name"));
+            assert!(!env.contains_key("common_name"));
         }
         other => panic!("expected Client notification, got: {other:?}"),
     }
@@ -197,8 +197,8 @@ fn client_env_value_with_multiple_equals() {
     match &msgs[0] {
         OvpnMessage::Notification(Notification::Client { env, .. }) => {
             // split_once('=') should preserve everything after first '='.
-            assert_eq!(env[0], ("tls_id_0".into(), "CN=user,OU=vpn,O=corp".into()));
-            assert_eq!(env[1], ("X509_0_CN".into(), "admin=root".into()));
+            assert_eq!(env["tls_id_0"], "CN=user,OU=vpn,O=corp");
+            assert_eq!(env["X509_0_CN"], "admin=root");
         }
         other => panic!("expected Client notification, got: {other:?}"),
     }
@@ -217,7 +217,7 @@ fn client_env_key_with_no_equals() {
     assert_eq!(msgs.len(), 1);
     match &msgs[0] {
         OvpnMessage::Notification(Notification::Client { env, .. }) => {
-            assert_eq!(env[0], ("bare_key".into(), "".into()));
+            assert_eq!(env["bare_key"], "");
         }
         other => panic!("expected Client notification, got: {other:?}"),
     }
@@ -444,7 +444,7 @@ fn client_unknown_event_type_still_accumulates_env() {
             assert_eq!(*cid, 7);
             assert_eq!(*kid, Some(2));
             assert_eq!(env.len(), 1);
-            assert_eq!(env[0], ("foo".into(), "bar".into()));
+            assert_eq!(env["foo"], "bar");
         }
         other => panic!("expected Client notification, got: {other:?}"),
     }
@@ -519,7 +519,7 @@ fn incomplete_client_env_block_buffers_correctly() {
     match msg.unwrap() {
         OvpnMessage::Notification(Notification::Client { env, .. }) => {
             assert_eq!(env.len(), 1);
-            assert_eq!(env[0], ("key".into(), "val".into()));
+            assert_eq!(env["key"], "val");
         }
         other => panic!("expected Client notification, got: {other:?}"),
     }
@@ -707,11 +707,11 @@ fn client_cr_response_with_full_env() {
             assert_eq!(*cid, 42);
             assert_eq!(*kid, Some(0));
             assert_eq!(env.len(), 7);
-            assert_eq!(env[0], ("untrusted_ip".into(), "203.0.113.50".into()));
-            assert_eq!(env[3], ("username".into(), "jdoe".into()));
-            assert!(
-                env.iter()
-                    .any(|(k, v)| k == "IV_SSO" && v == "webauth,openurl,crtext"),
+            assert_eq!(env["untrusted_ip"], "203.0.113.50");
+            assert_eq!(env["username"], "jdoe");
+            assert_eq!(
+                env.get("IV_SSO").map(String::as_str),
+                Some("webauth,openurl,crtext"),
                 "expected IV_SSO with crtext capability"
             );
         }

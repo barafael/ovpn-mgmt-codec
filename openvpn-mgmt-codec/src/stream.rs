@@ -3,9 +3,9 @@
 //! The raw codec yields [`OvpnMessage`] variants, and callers typically
 //! need to branch on "is this a response to a command I sent?" vs. "is
 //! this an asynchronous notification?". This module provides
-//! [`ManagementEvent`] (the two-variant enum) and [`classify`] (a mapping
-//! function suitable for use with stream combinators like
-//! `StreamExt::map`).
+//! [`ManagementEvent`] (the two-variant enum) and [`ClassifyExt`] (an
+//! extension trait that adds [`.classify()`](ClassifyExt::classify) to
+//! any stream of codec results).
 //!
 //! # Notification interleaving
 //!
@@ -21,14 +21,14 @@
 //! use tokio_util::codec::Framed;
 //! use futures::{SinkExt, StreamExt};
 //! use openvpn_mgmt_codec::{OvpnCodec, OvpnCommand, StatusFormat};
-//! use openvpn_mgmt_codec::stream::{ManagementEvent, classify};
+//! use openvpn_mgmt_codec::stream::{ManagementEvent, ClassifyExt};
 //!
 //! # async fn example() -> anyhow::Result<()> {
 //! let stream = TcpStream::connect("127.0.0.1:7505").await?;
 //! let framed = Framed::new(stream, OvpnCodec::new());
 //! let (mut sink, raw_stream) = framed.split();
 //!
-//! let mut mgmt = raw_stream.map(classify);
+//! let mut mgmt = raw_stream.classify();
 //!
 //! sink.send(OvpnCommand::Status(StatusFormat::V3)).await?;
 //!
@@ -47,6 +47,11 @@
 //! ```
 
 use std::io;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use futures_core::Stream;
+use pin_project_lite::pin_project;
 
 use crate::message::{Notification, OvpnMessage};
 
@@ -73,16 +78,41 @@ impl From<OvpnMessage> for ManagementEvent {
     }
 }
 
-/// Classify an [`OvpnMessage`] result into a [`ManagementEvent`] result.
+pin_project! {
+    /// A stream of [`ManagementEvent`]s, produced by
+    /// [`ClassifyExt::classify`].
+    ///
+    /// Each incoming `Result<OvpnMessage, io::Error>` is mapped through
+    /// the [`From<OvpnMessage> for ManagementEvent`] conversion, splitting
+    /// notifications from command responses.
+    pub struct Classified<S> {
+        #[pin]
+        inner: S,
+    }
+}
+
+impl<S> Stream for Classified<S>
+where
+    S: Stream<Item = Result<OvpnMessage, io::Error>>,
+{
+    type Item = Result<ManagementEvent, io::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.project()
+            .inner
+            .poll_next(cx)
+            .map(|opt| opt.map(|result| result.map(ManagementEvent::from)))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+/// Extension trait that adds [`.classify()`](ClassifyExt::classify) to
+/// any stream of `Result<OvpnMessage, io::Error>`.
 ///
-/// This function is designed to be passed directly to a stream combinator:
-///
-/// ```ignore
-/// use futures::StreamExt;
-/// let events = raw_stream.map(classify);
-/// ```
-///
-/// # Extracting notifications with timeout
+/// # Example
 ///
 /// ```no_run
 /// use anyhow::Context;
@@ -168,9 +198,15 @@ impl From<OvpnMessage> for ManagementEvent {
 /// # Ok(())
 /// # }
 /// ```
-pub fn classify(result: Result<OvpnMessage, io::Error>) -> Result<ManagementEvent, io::Error> {
-    result.map(ManagementEvent::from)
+pub trait ClassifyExt: Stream<Item = Result<OvpnMessage, io::Error>> + Sized {
+    /// Classify each [`OvpnMessage`] into a [`ManagementEvent`],
+    /// splitting notifications from command responses.
+    fn classify(self) -> Classified<Self> {
+        Classified { inner: self }
+    }
 }
+
+impl<S: Stream<Item = Result<OvpnMessage, io::Error>>> ClassifyExt for S {}
 
 #[cfg(test)]
 mod tests {
@@ -207,22 +243,5 @@ mod tests {
             event,
             ManagementEvent::Response(OvpnMessage::Info(_))
         ));
-    }
-
-    #[test]
-    fn classify_maps_ok() {
-        let result: Result<OvpnMessage, io::Error> =
-            Ok(OvpnMessage::Success("it worked!".to_string()));
-        let event = classify(result).unwrap();
-        assert_eq!(
-            event,
-            ManagementEvent::Response(OvpnMessage::Success("it worked!".to_string()))
-        );
-    }
-
-    #[test]
-    fn classify_passes_through_error() {
-        let result: Result<OvpnMessage, io::Error> = Err(io::Error::other("fail"));
-        assert!(classify(result).is_err());
     }
 }

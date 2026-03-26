@@ -117,10 +117,7 @@ impl App {
             ConnectionState::Connecting => {
                 let palette = self.theme.extended_palette();
                 let dots = ".".repeat(self.connecting_dots as usize);
-                (
-                    palette.primary.base.color,
-                    format!("Connecting{dots}"),
-                )
+                (palette.primary.base.color, format!("Connecting{dots}"))
             }
             ConnectionState::Connected => {
                 let palette = self.theme.extended_palette();
@@ -380,7 +377,12 @@ impl App {
 
         rows.push(Space::new().height(8).into());
         rows.push(section_heading("Throughput"));
-        let latest = self.throughput.samples().back().copied().unwrap_or_default();
+        let latest = self
+            .throughput
+            .samples()
+            .back()
+            .copied()
+            .unwrap_or_default();
         rows.push(
             row![
                 text("↓").size(12).style(text::success),
@@ -397,7 +399,10 @@ impl App {
             .align_y(iced::Alignment::Center)
             .into(),
         );
-        rows.push(crate::chart::throughput_chart_sized(&self.throughput, 200.0));
+        rows.push(crate::chart::throughput_chart_sized(
+            &self.throughput,
+            200.0,
+        ));
 
         #[cfg(debug_assertions)]
         rows.push(

@@ -102,7 +102,11 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let month_offset = (5 * doy + 2) / 153;
     let day = doy - (153 * month_offset + 2) / 5 + 1;
-    let month = if month_offset < 10 { month_offset + 3 } else { month_offset - 9 };
+    let month = if month_offset < 10 {
+        month_offset + 3
+    } else {
+        month_offset - 9
+    };
     let year = if month <= 2 { year + 1 } else { year };
     (year, month, day)
 }
@@ -142,7 +146,9 @@ fn print_notification(notification: &Notification) {
             ..
         } => {
             let formatted_timestamp = format_timestamp(*timestamp);
-            println!("[STATE] {name} — {description} (local={local_ip}, remote={remote_ip}, {formatted_timestamp})");
+            println!(
+                "[STATE] {name} — {description} (local={local_ip}, remote={remote_ip}, {formatted_timestamp})"
+            );
         }
         Notification::ByteCount {
             bytes_in,

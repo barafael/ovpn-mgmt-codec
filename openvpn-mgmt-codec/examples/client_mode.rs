@@ -20,7 +20,7 @@ use futures::{SinkExt, StreamExt};
 use openvpn_mgmt_codec::{
     Notification, OvpnCodec, OvpnCommand, StatusFormat,
     command::connection_sequence,
-    stream::{ManagementEvent, classify},
+    stream::{ClassifyExt, ManagementEvent},
 };
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
 async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
     let framed = Framed::new(stream, OvpnCodec::new());
     let (mut sink, raw_stream) = framed.split();
-    let mut mgmt = raw_stream.map(classify);
+    let mut mgmt = raw_stream.classify();
 
     // Run the standard startup sequence (enable log/state streaming,
     // request pid, set up bytecount reporting, release hold).

@@ -19,6 +19,7 @@
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::process::Command;
 use std::time::Duration;
 
@@ -50,7 +51,7 @@ async fn query_status(
 /// Drain messages until `>CLIENT:CONNECT`. Returns `(cid, kid, env)`.
 async fn wait_for_client_connect(
     framed: &mut Framed<TcpStream, OvpnCodec>,
-) -> (u64, u64, Vec<(String, String)>) {
+) -> (u64, u64, BTreeMap<String, String>) {
     timeout(MSG_TIMEOUT, async {
         loop {
             let msg = recv_raw(framed).await;
@@ -140,15 +141,15 @@ async fn server_mode_lifecycle() {
         env.len()
     );
 
-    let keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
+    let keys: Vec<&str> = env.keys().map(String::as_str).collect();
     assert!(
         keys.iter()
-            .any(|key| key.contains("common_name") || k.contains("CN")),
+            .any(|key| key.contains("common_name") || key.contains("CN")),
         "ENV should contain common_name or CN, got keys: {keys:?}",
     );
     assert!(
         keys.iter()
-            .any(|key| key.contains("untrusted_ip") || k.contains("trusted_ip")),
+            .any(|key| key.contains("untrusted_ip") || key.contains("trusted_ip")),
         "ENV should contain an IP-related key, got keys: {keys:?}",
     );
 
@@ -270,9 +271,9 @@ async fn server_mode_lifecycle() {
                     match &msg {
                         OvpnMessage::MultiLine(lines) => {
                             assert!(
-                                lines
-                                    .iter()
-                                    .any(|line| { line.contains("HEADER") || line.contains("CLIENT_LIST") }),
+                                lines.iter().any(|line| {
+                                    line.contains("HEADER") || line.contains("CLIENT_LIST")
+                                }),
                                 "status response should be intact, got {lines:?}",
                             );
                             status_count += 1;
@@ -399,12 +400,12 @@ async fn server_mode_lifecycle() {
 
     send_ok(
         &mut framed,
-        OvpnCommand::ClientDeny {
+        OvpnCommand::ClientDeny(ClientDeny {
             cid: cid3,
             kid: kid3,
             reason: "conformance-test-deny".into(),
             client_reason: Some("denied by test".into()),
-        },
+        }),
         "client-deny",
     )
     .await;

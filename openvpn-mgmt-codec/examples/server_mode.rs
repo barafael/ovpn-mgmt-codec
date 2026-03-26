@@ -23,8 +23,8 @@ use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use openvpn_mgmt_codec::{
     OvpnCodec, OvpnCommand,
-    command::connection_sequence,
-    stream::{ManagementEvent, classify},
+    command::server_connection_sequence,
+    stream::{ClassifyExt, ManagementEvent},
 };
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
@@ -68,10 +68,10 @@ async fn main() -> anyhow::Result<()> {
 async fn handle_connection(stream: TcpStream, peer: SocketAddr) -> anyhow::Result<()> {
     let framed = Framed::new(stream, OvpnCodec::new());
     let (mut sink, raw_stream) = framed.split();
-    let mut mgmt = raw_stream.map(classify);
+    let mut mgmt = raw_stream.classify();
 
-    // Run the standard startup sequence.
-    for cmd in connection_sequence(5) {
+    // Run the server-mode startup sequence (includes env-filter setup).
+    for cmd in server_connection_sequence(5, 0) {
         sink.send(cmd).await?;
     }
 

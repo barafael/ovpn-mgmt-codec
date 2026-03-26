@@ -251,23 +251,23 @@ fn static_challenge_response_with_equals_in_b64() {
 
 #[test]
 fn client_deny_reason_with_quotes() {
-    let wire = encode_str(OvpnCommand::ClientDeny {
+    let wire = encode_str(OvpnCommand::ClientDeny(ClientDeny {
         cid: 1,
         kid: 0,
         reason: r#"reason "with quotes""#.to_string(),
         client_reason: Some(r#"client "reason""#.to_string()),
-    });
+    }));
     assert_eq!(wire.lines().count(), 1);
 }
 
 #[test]
 fn client_deny_without_client_reason() {
-    let wire = encode_str(OvpnCommand::ClientDeny {
+    let wire = encode_str(OvpnCommand::ClientDeny(ClientDeny {
         cid: 1,
         kid: 0,
         reason: "simple reason".to_string(),
         client_reason: None,
-    });
+    }));
     assert_eq!(wire.lines().count(), 1);
     assert!(wire.starts_with("client-deny 1 0 "));
 }

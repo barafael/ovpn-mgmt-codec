@@ -103,7 +103,8 @@ fn arb_password_notification() -> BoxedStrategy<PasswordNotification> {
     prop_oneof![
         arb_auth_type().prop_map(|auth| PasswordNotification::NeedAuth { auth_type: auth }),
         arb_auth_type().prop_map(|auth| PasswordNotification::NeedPassword { auth_type: auth }),
-        arb_auth_type().prop_map(|auth| PasswordNotification::VerificationFailed { auth_type: auth }),
+        arb_auth_type()
+            .prop_map(|auth| PasswordNotification::VerificationFailed { auth_type: auth }),
         (any::<bool>(), any::<bool>(), safe_text()).prop_map(
             |(echo, response_concat, challenge)| {
                 PasswordNotification::StaticChallenge {
@@ -137,7 +138,7 @@ fn arb_password_notification() -> BoxedStrategy<PasswordNotification> {
 // the original message from these bytes.
 
 fn notification_to_wire(notification: &Notification) -> String {
-    match notification{
+    match notification {
         Notification::State {
             timestamp,
             name,
@@ -533,8 +534,8 @@ proptest! {
         event in arb_client_event(),
         cid in any::<u64>(),
         kid in prop::option::of(any::<u64>()),
-        env in prop::collection::vec(
-            (safe_env_key(), safe_text()),
+        env in prop::collection::btree_map(
+            safe_env_key(), safe_text(),
             0..10,
         ),
     ) {
@@ -762,12 +763,14 @@ fn arb_ovpn_command_with(s: BoxedStrategy<String>) -> BoxedStrategy<OvpnCommand>
             })
             .boxed(),
         (any::<u64>(), any::<u64>(), s.clone(), any::<u32>())
-            .prop_map(|(cid, kid, extra, timeout)| OvpnCommand::ClientPendingAuth {
-                cid,
-                kid,
-                extra,
-                timeout,
-            })
+            .prop_map(
+                |(cid, kid, extra, timeout)| OvpnCommand::ClientPendingAuth {
+                    cid,
+                    kid,
+                    extra,
+                    timeout,
+                },
+            )
             .boxed(),
         // --- Complex with Option strings ---
         (
@@ -776,11 +779,13 @@ fn arb_ovpn_command_with(s: BoxedStrategy<String>) -> BoxedStrategy<OvpnCommand>
             s.clone(),
             prop::option::of(s.clone()),
         )
-            .prop_map(|(c, k, r, cr)| OvpnCommand::ClientDeny {
-                cid: c,
-                kid: k,
-                reason: r,
-                client_reason: cr,
+            .prop_map(|(c, k, r, cr)| {
+                OvpnCommand::ClientDeny(ClientDeny {
+                    cid: c,
+                    kid: k,
+                    reason: r,
+                    client_reason: cr,
+                })
             })
             .boxed(),
         // --- Multi-line commands ---
@@ -917,10 +922,7 @@ fn arb_roundtrippable_command() -> BoxedStrategy<OvpnCommand> {
             })
             .boxed(),
         (safe_host.clone(), arb_need_ok_response())
-            .prop_map(|(name, response)| OvpnCommand::NeedOk {
-                name,
-                response,
-            })
+            .prop_map(|(name, response)| OvpnCommand::NeedOk { name, response })
             .boxed(),
         (safe_host.clone(), safe_val.clone())
             .prop_map(|(name, value)| OvpnCommand::NeedStr { name, value })
@@ -943,11 +945,13 @@ fn arb_roundtrippable_command() -> BoxedStrategy<OvpnCommand> {
             safe_val.clone(),
             prop::option::of(safe_val.clone()),
         )
-            .prop_map(|(cid, kid, reason, client_reason)| OvpnCommand::ClientDeny {
-                cid,
-                kid,
-                reason,
-                client_reason,
+            .prop_map(|(cid, kid, reason, client_reason)| {
+                OvpnCommand::ClientDeny(ClientDeny {
+                    cid,
+                    kid,
+                    reason,
+                    client_reason,
+                })
             })
             .boxed(),
         (any::<u64>(), prop::option::of(safe_host.clone()))
@@ -959,12 +963,14 @@ fn arb_roundtrippable_command() -> BoxedStrategy<OvpnCommand> {
         Just(OvpnCommand::RemoteEntryCount).boxed(),
         // --- Extended client management ---
         (any::<u64>(), any::<u64>(), safe_host.clone(), any::<u32>())
-            .prop_map(|(cid, kid, extra, timeout)| OvpnCommand::ClientPendingAuth {
-                cid,
-                kid,
-                extra,
-                timeout,
-            })
+            .prop_map(
+                |(cid, kid, extra, timeout)| OvpnCommand::ClientPendingAuth {
+                    cid,
+                    kid,
+                    extra,
+                    timeout,
+                },
+            )
             .boxed(),
         // cr-response value is base64, not quoted on the wire — no spaces.
         safe_host
@@ -1024,48 +1030,40 @@ fn arb_single_line_notification() -> BoxedStrategy<Notification> {
                 message: msg,
             }
         }),
-        (any::<u64>(), safe_text()).prop_map(|(timestamp, param)| Notification::Echo {
-            timestamp,
-            param
-        }),
+        (any::<u64>(), safe_text())
+            .prop_map(|(timestamp, param)| Notification::Echo { timestamp, param }),
         safe_text().prop_map(|text| Notification::Hold { text }),
         safe_text().prop_map(|message| Notification::Fatal { message }),
         any::<u32>().prop_map(|count| Notification::Pkcs11IdCount { count }),
-        (safe_field(), safe_text()).prop_map(|(name, message)| Notification::NeedOk {
-            name,
-            message
-        }),
-        (safe_field(), safe_text()).prop_map(|(name, message)| Notification::NeedStr {
-            name,
-            message
-        }),
+        (safe_field(), safe_text())
+            .prop_map(|(name, message)| Notification::NeedOk { name, message }),
+        (safe_field(), safe_text())
+            .prop_map(|(name, message)| Notification::NeedStr { name, message }),
         safe_text().prop_map(|data| Notification::RsaSign { data }),
-        (safe_field(), any::<u16>(), arb_transport_protocol()).prop_map(|(host, port, protocol)| {
-            Notification::Remote {
-                host,
-                port,
-                protocol,
+        (safe_field(), any::<u16>(), arb_transport_protocol()).prop_map(
+            |(host, port, protocol)| {
+                Notification::Remote {
+                    host,
+                    port,
+                    protocol,
+                }
             }
-        }),
-        (any::<u32>(), arb_transport_protocol(), safe_field()).prop_map(|(index, proxy_type, host)| {
-            Notification::Proxy {
-                index,
-                proxy_type,
-                host,
+        ),
+        (any::<u32>(), arb_transport_protocol(), safe_field()).prop_map(
+            |(index, proxy_type, host)| {
+                Notification::Proxy {
+                    index,
+                    proxy_type,
+                    host,
+                }
             }
-        }),
+        ),
         arb_password_notification().prop_map(Notification::Password),
         (any::<u64>(), safe_field(), any::<bool>()).prop_map(|(cid, addr, primary)| {
-            Notification::ClientAddress {
-                cid,
-                addr,
-                primary,
-            }
+            Notification::ClientAddress { cid, addr, primary }
         }),
-        ("CUSTOM_[A-Z]{1,10}", safe_text()).prop_map(|(kind, payload)| Notification::Simple {
-            kind,
-            payload
-        }),
+        ("CUSTOM_[A-Z]{1,10}", safe_text())
+            .prop_map(|(kind, payload)| Notification::Simple { kind, payload }),
     ]
     .boxed()
 }
@@ -1289,8 +1287,8 @@ proptest! {
         event in arb_client_event(),
         cid in any::<u64>(),
         kid in prop::option::of(any::<u64>()),
-        env in prop::collection::vec(
-            (safe_env_key(), safe_text()),
+        env in prop::collection::btree_map(
+            safe_env_key(), safe_text(),
             0..10,
         ),
     ) {
@@ -1323,8 +1321,8 @@ proptest! {
         event in arb_client_event(),
         cid in any::<u64>(),
         kid in prop::option::of(any::<u64>()),
-        env in prop::collection::vec(
-            (safe_env_key(), safe_text()),
+        env in prop::collection::btree_map(
+            safe_env_key(), safe_text(),
             0..20,
         ),
     ) {
