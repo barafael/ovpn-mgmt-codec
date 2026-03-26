@@ -311,6 +311,7 @@ impl Encoder<OvpnCommand> for OvpnCodec {
             OvpnCommand::State => write_line(dst, "state"),
             OvpnCommand::StateStream(ref m) => write_line(dst, &format!("state {m}")),
             OvpnCommand::Version => write_line(dst, "version"),
+            OvpnCommand::SetVersion(n) => write_line(dst, &format!("version {n}")),
             OvpnCommand::Pid => write_line(dst, "pid"),
             OvpnCommand::Help => write_line(dst, "help"),
             OvpnCommand::Net => write_line(dst, "net"),
@@ -551,6 +552,9 @@ impl Encoder<OvpnCommand> for OvpnCodec {
             // --- Remote/Proxy ---
             OvpnCommand::Remote(RemoteAction::Accept) => write_line(dst, "remote ACCEPT"),
             OvpnCommand::Remote(RemoteAction::Skip) => write_line(dst, "remote SKIP"),
+            OvpnCommand::Remote(RemoteAction::SkipN(n)) => {
+                write_line(dst, &format!("remote SKIP {n}"));
+            }
             OvpnCommand::Remote(RemoteAction::Modify { ref host, port }) => {
                 let host = wire_safe(host, "remote MOD host", mode)?;
                 write_line(dst, &format!("remote MOD {host} {port}"));
@@ -948,6 +952,12 @@ impl OvpnCodec {
                 data: payload.to_string(),
             }),
             "PK_SIGN" => parse_pk_sign(payload),
+            "INFOMSG" => Some(Notification::InfoMsg {
+                extra: payload.to_string(),
+            }),
+            "NEED-CERTIFICATE" => Some(Notification::NeedCertificate {
+                hint: payload.to_string(),
+            }),
             "REMOTE" => parse_remote(payload),
             "PROXY" => parse_proxy(payload),
             "PASSWORD" => parse_password(payload),
@@ -2090,6 +2100,20 @@ mod tests {
         assert!(
             matches!(&msg, OvpnMessage::Success(_)),
             "expected Success after UTF-8 reset, got {msg:?}"
+        );
+    }
+
+    #[test]
+    fn encode_set_version() {
+        assert_eq!(encode_to_string(OvpnCommand::SetVersion(2)), "version 2\n");
+        assert_eq!(encode_to_string(OvpnCommand::SetVersion(4)), "version 4\n");
+    }
+
+    #[test]
+    fn encode_remote_skip_n() {
+        assert_eq!(
+            encode_to_string(OvpnCommand::Remote(RemoteAction::SkipN(3))),
+            "remote SKIP 3\n"
         );
     }
 }

@@ -898,6 +898,12 @@ impl App {
             Notification::Info { message } => {
                 self.add_log(LogLevel::Info, "", &message);
             }
+            Notification::InfoMsg { extra } => {
+                self.add_log(LogLevel::Info, "", &format!("INFOMSG: {extra}"));
+            }
+            Notification::NeedCertificate { hint } => {
+                self.add_log(LogLevel::Warning, "", &format!("Need certificate: {hint}"));
+            }
             Notification::Simple { kind, payload } => {
                 self.add_log(LogLevel::Info, "", &format!("[{kind}] {payload}"));
             }

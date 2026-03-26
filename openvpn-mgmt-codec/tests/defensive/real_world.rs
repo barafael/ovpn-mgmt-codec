@@ -331,16 +331,15 @@ fn unknown_notification_type_degrades_to_simple() {
 }
 
 #[test]
-fn infomsg_web_auth_degrades_to_simple() {
-    // >INFOMSG: (not >INFO:) is a distinct, unmodeled notification type.
+fn infomsg_web_auth_is_first_class() {
+    // >INFOMSG: is a first-class notification type.
     let msgs = decode_all(">INFOMSG:WEB_AUTH::https://auth.example.com/verify?session=abc123\n");
     assert_eq!(msgs.len(), 1);
     match &msgs[0] {
-        OvpnMessage::Notification(Notification::Simple { kind, payload }) => {
-            assert_eq!(kind, "INFOMSG");
-            assert!(payload.contains("WEB_AUTH"));
+        OvpnMessage::Notification(Notification::InfoMsg { extra }) => {
+            assert!(extra.contains("WEB_AUTH"));
         }
-        other => panic!("expected Simple fallback, got: {other:?}"),
+        other => panic!("expected InfoMsg, got: {other:?}"),
     }
 }
 

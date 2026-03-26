@@ -256,6 +256,12 @@ fn print_notification(notification: &Notification) {
         Notification::Info { message } => {
             println!("[INFO] {message}");
         }
+        Notification::InfoMsg { extra } => {
+            println!("[INFOMSG] {extra}");
+        }
+        Notification::NeedCertificate { hint } => {
+            println!("[NEED-CERTIFICATE] {hint}");
+        }
         Notification::Pkcs11IdCount { count } => {
             println!("[PKCS11ID-COUNT] {count}");
         }

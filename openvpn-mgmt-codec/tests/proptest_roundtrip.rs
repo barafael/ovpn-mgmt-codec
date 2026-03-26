@@ -248,6 +248,8 @@ fn notification_to_wire(notification: &Notification) -> String {
             None => format!(">PK_SIGN:{data}\n"),
         },
         Notification::Info { message } => format!(">INFO:{message}\n"),
+        Notification::InfoMsg { extra } => format!(">INFOMSG:{extra}\n"),
+        Notification::NeedCertificate { hint } => format!(">NEED-CERTIFICATE:{hint}\n"),
         Notification::Simple { kind, payload } => format!(">{kind}:{payload}\n"),
     }
 }
@@ -671,6 +673,7 @@ fn arb_ovpn_command_with(s: BoxedStrategy<String>) -> BoxedStrategy<OvpnCommand>
     let remote = prop_oneof![
         Just(RemoteAction::Accept),
         Just(RemoteAction::Skip),
+        (1..100u32).prop_map(RemoteAction::SkipN),
         (s.clone(), any::<u16>()).prop_map(|(host, port)| RemoteAction::Modify { host, port }),
     ];
     let proxy = prop_oneof![
@@ -687,6 +690,7 @@ fn arb_ovpn_command_with(s: BoxedStrategy<String>) -> BoxedStrategy<OvpnCommand>
         // --- Parameterless ---
         Just(OvpnCommand::State).boxed(),
         Just(OvpnCommand::Version).boxed(),
+        (1..10u32).prop_map(OvpnCommand::SetVersion).boxed(),
         Just(OvpnCommand::Pid).boxed(),
         Just(OvpnCommand::Help).boxed(),
         Just(OvpnCommand::Net).boxed(),
@@ -856,6 +860,7 @@ fn arb_roundtrippable_command() -> BoxedStrategy<OvpnCommand> {
     let remote = prop_oneof![
         Just(RemoteAction::Accept),
         Just(RemoteAction::Skip),
+        (1..100u32).prop_map(RemoteAction::SkipN),
         (safe_host.clone(), any::<u16>())
             .prop_map(|(host, port)| RemoteAction::Modify { host, port }),
     ];
@@ -876,6 +881,7 @@ fn arb_roundtrippable_command() -> BoxedStrategy<OvpnCommand> {
         // --- Parameterless ---
         Just(OvpnCommand::State).boxed(),
         Just(OvpnCommand::Version).boxed(),
+        (1..10u32).prop_map(OvpnCommand::SetVersion).boxed(),
         Just(OvpnCommand::Pid).boxed(),
         Just(OvpnCommand::Help).boxed(),
         Just(OvpnCommand::Net).boxed(),
@@ -1062,6 +1068,8 @@ fn arb_single_line_notification() -> BoxedStrategy<Notification> {
         (any::<u64>(), safe_field(), any::<bool>()).prop_map(|(cid, addr, primary)| {
             Notification::ClientAddress { cid, addr, primary }
         }),
+        safe_text().prop_map(|extra| Notification::InfoMsg { extra }),
+        safe_text().prop_map(|hint| Notification::NeedCertificate { hint }),
         ("CUSTOM_[A-Z]{1,10}", safe_text())
             .prop_map(|(kind, payload)| Notification::Simple { kind, payload }),
     ]

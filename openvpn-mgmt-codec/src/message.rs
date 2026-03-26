@@ -219,16 +219,44 @@ pub enum Notification {
     /// [`PkSig`](crate::OvpnCommand::PkSig).
     ///
     /// The `algorithm` field is present only when the management client
-    /// announced version > 2 via the `version` command.
+    /// announced version > 2 via the `version` command. For RSA-PSS, the
+    /// algorithm includes comma-separated params:
+    /// `RSA_PKCS1_PSS_PADDING,hashalg=SHA256,saltlen=max`.
     ///
     /// Source: [`management-notes.txt`](https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt),
     /// [`ssl_openssl.c` `get_sig_from_man()`](https://github.com/OpenVPN/openvpn/blob/master/src/openvpn/ssl_openssl.c).
     PkSign {
         /// Base64-encoded data to be signed.
         data: String,
-        /// Signing algorithm (e.g. `RSA_PKCS1_PADDING`, `EC`).
+        /// Signing algorithm (e.g. `RSA_PKCS1_PADDING`, `ECDSA`,
+        /// `RSA_PKCS1_PSS_PADDING,hashalg=SHA256,saltlen=max`).
         /// Only present when management client version > 2.
         algorithm: Option<String>,
+    },
+
+    /// `>INFOMSG:extra`
+    ///
+    /// Authentication-related information from the server, such as
+    /// `CR_TEXT` challenges, `OPEN_URL`, or `WEB_AUTH` SSO directives.
+    /// Delivered to the client via `client-pending-auth`.
+    ///
+    /// Source: [`management-notes.txt`](https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt)
+    /// (see "client-pending-auth" section).
+    InfoMsg {
+        /// The info message content (e.g. `WEB_AUTH::https://...` or
+        /// `CR_TEXT:R,E:Enter your TOTP code`).
+        extra: String,
+    },
+
+    /// `>NEED-CERTIFICATE:hint`
+    ///
+    /// Requests an external certificate when `--management-external-cert`
+    /// is active. The hint identifies which certificate to provide
+    /// (e.g. `macosx-keychain:subject:o=OpenVPN-TEST`). The management
+    /// client responds with [`Certificate`](crate::OvpnCommand::Certificate).
+    NeedCertificate {
+        /// Hint string for locating the certificate.
+        hint: String,
     },
 
     /// `>INFO:message`

@@ -2512,8 +2512,6 @@ fn unrecognized_notification_falls_back_to_simple() {
     let unknown_types = [
         ">NOTIFY:info,remote-exit,EXIT\n",
         ">UPDOWN:UP,tun0,1500,1500,10.8.0.2,10.8.0.1,init\n",
-        ">INFOMSG:WEB_AUTH::https://auth.example.com/login?session=abc123\n",
-        ">NEED-CERTIFICATE:macosx-keychain:subject:o=OpenVPN-TEST\n",
     ];
     for input in &unknown_types {
         let msgs = decode_all(input);
@@ -2562,10 +2560,9 @@ fn infomsg_web_auth() {
     let msgs = decode_all(">INFOMSG:WEB_AUTH::https://auth.example.com/login\n");
     assert_eq!(msgs.len(), 1);
     match &msgs[0] {
-        OvpnMessage::Notification(Notification::Simple { kind, payload }) => {
-            assert_eq!(kind, "INFOMSG");
-            assert!(payload.contains("WEB_AUTH"));
-            assert!(payload.contains("https://auth.example.com"));
+        OvpnMessage::Notification(Notification::InfoMsg { extra }) => {
+            assert!(extra.contains("WEB_AUTH"));
+            assert!(extra.contains("https://auth.example.com"));
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -2576,10 +2573,9 @@ fn infomsg_cr_text() {
     let msgs = decode_all(">INFOMSG:CR_TEXT:R,E:Please enter your TOTP code\n");
     assert_eq!(msgs.len(), 1);
     match &msgs[0] {
-        OvpnMessage::Notification(Notification::Simple { kind, payload }) => {
-            assert_eq!(kind, "INFOMSG");
-            assert!(payload.contains("CR_TEXT"));
-            assert!(payload.contains("TOTP code"));
+        OvpnMessage::Notification(Notification::InfoMsg { extra }) => {
+            assert!(extra.contains("CR_TEXT"));
+            assert!(extra.contains("TOTP code"));
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -3433,5 +3429,231 @@ fn client_notification_interleaved_in_multiline_response() {
     if let OvpnMessage::MultiLine(lines) = &msgs[1] {
         assert!(lines.iter().any(|line| line.contains("TITLE")));
         assert!(lines.iter().any(|line| line.contains("TIME")));
+    }
+}
+
+// ---  ---
+// PK_SIGN with RSA-PSS params (comma-separated params in algorithm field)
+// ---  ---
+
+#[test]
+fn pk_sign_rsa_pss_with_params() {
+    // The algorithm field for RSA-PSS includes comma-separated params:
+    // RSA_PKCS1_PSS_PADDING,hashalg=SHA256,saltlen=max
+    // The first comma separates base64 data from the algorithm string;
+    // subsequent commas are part of the algorithm.
+    let msgs = decode_all(">PK_SIGN:dGVzdA==,RSA_PKCS1_PSS_PADDING,hashalg=SHA256,saltlen=max\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::PkSign { data, algorithm }) => {
+            assert_eq!(data, "dGVzdA==");
+            assert_eq!(
+                algorithm.as_deref(),
+                Some("RSA_PKCS1_PSS_PADDING,hashalg=SHA256,saltlen=max")
+            );
+        }
+        other => panic!("expected PkSign, got: {other:?}"),
+    }
+}
+
+#[test]
+fn pk_sign_rsa_pss_with_digest_saltlen() {
+    let msgs =
+        decode_all(">PK_SIGN:AQID/base64==,RSA_PKCS1_PSS_PADDING,hashalg=SHA384,saltlen=digest\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::PkSign { data, algorithm }) => {
+            assert_eq!(data, "AQID/base64==");
+            assert_eq!(
+                algorithm.as_deref(),
+                Some("RSA_PKCS1_PSS_PADDING,hashalg=SHA384,saltlen=digest")
+            );
+        }
+        other => panic!("expected PkSign, got: {other:?}"),
+    }
+}
+
+#[test]
+fn pk_sign_rsa_no_padding() {
+    let msgs = decode_all(">PK_SIGN:dGVzdA==,RSA_NO_PADDING\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(
+        &msgs[0],
+        OvpnMessage::Notification(Notification::PkSign {
+            data,
+            algorithm: Some(algo),
+        }) if data == "dGVzdA==" && algo == "RSA_NO_PADDING"
+    ));
+}
+
+// ---  ---
+// AUTH_PENDING state with timeout description
+// ---  ---
+
+#[test]
+fn state_auth_pending_with_timeout() {
+    // Per spec: "For AUTH_PENDING, if (c) is present, it would read
+    // as 'timeout number' where number is the number of seconds."
+    let msgs = decode_all(">STATE:1711000020,AUTH_PENDING,timeout 120,,,,,\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::State {
+            name, description, ..
+        }) => {
+            assert_eq!(*name, OpenVpnState::AuthPending);
+            assert_eq!(description, "timeout 120");
+        }
+        other => panic!("expected STATE notification, got: {other:?}"),
+    }
+}
+
+// ---  ---
+// SetVersion command (version N)
+// ---  ---
+
+#[test]
+fn encode_set_version() {
+    assert_eq!(encode_to_string(OvpnCommand::SetVersion(2)), "version 2\n");
+    assert_eq!(encode_to_string(OvpnCommand::SetVersion(3)), "version 3\n");
+    assert_eq!(encode_to_string(OvpnCommand::SetVersion(5)), "version 5\n");
+}
+
+#[test]
+fn set_version_v4_returns_success() {
+    // Versions >= 4 produce a SUCCESS: response.
+    let msgs = encode_then_decode(OvpnCommand::SetVersion(4), "SUCCESS: version set to 4\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(&msgs[0], OvpnMessage::Success(s) if s.contains("version")));
+}
+
+#[test]
+fn set_version_v2_no_response() {
+    // Versions < 4 produce no response. The codec should not expect one,
+    // so a subsequent notification should be decoded normally.
+    let mut codec = OvpnCodec::new();
+    let mut enc_buf = BytesMut::new();
+    codec
+        .encode(OvpnCommand::SetVersion(2), &mut enc_buf)
+        .unwrap();
+    assert_eq!(&enc_buf[..], b"version 2\n");
+
+    // Next thing on the wire is a notification (not a SUCCESS:).
+    let mut buf = BytesMut::from(">STATE:1711000000,CONNECTING,,,,,,\n");
+    let msg = codec.decode(&mut buf).unwrap().unwrap();
+    assert!(matches!(
+        msg,
+        OvpnMessage::Notification(Notification::State {
+            name: OpenVpnState::Connecting,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn set_version_from_str() {
+    assert_eq!(
+        "version 2".parse::<OvpnCommand>().unwrap(),
+        OvpnCommand::SetVersion(2)
+    );
+    assert_eq!(
+        "version 5".parse::<OvpnCommand>().unwrap(),
+        OvpnCommand::SetVersion(5)
+    );
+    // Bare "version" is still the query form.
+    assert_eq!(
+        "version".parse::<OvpnCommand>().unwrap(),
+        OvpnCommand::Version
+    );
+}
+
+// ---  ---
+// remote SKIP n (OpenVPN 2.6+)
+// ---  ---
+
+#[test]
+fn encode_remote_skip_n() {
+    assert_eq!(
+        encode_to_string(OvpnCommand::Remote(RemoteAction::SkipN(3))),
+        "remote SKIP 3\n"
+    );
+    assert_eq!(
+        encode_to_string(OvpnCommand::Remote(RemoteAction::SkipN(1))),
+        "remote SKIP 1\n"
+    );
+}
+
+#[test]
+fn remote_skip_n_from_str() {
+    assert_eq!(
+        "remote SKIP 3".parse::<OvpnCommand>().unwrap(),
+        OvpnCommand::Remote(RemoteAction::SkipN(3))
+    );
+    assert_eq!(
+        "remote skip 5".parse::<OvpnCommand>().unwrap(),
+        OvpnCommand::Remote(RemoteAction::SkipN(5))
+    );
+    // Bare skip (no N) is still RemoteAction::Skip.
+    assert_eq!(
+        "remote SKIP".parse::<OvpnCommand>().unwrap(),
+        OvpnCommand::Remote(RemoteAction::Skip)
+    );
+}
+
+// ---  ---
+// INFOMSG as first-class notification
+// ---  ---
+
+#[test]
+fn infomsg_notification_is_first_class() {
+    let msgs = decode_all(">INFOMSG:WEB_AUTH::https://auth.example.com/login?session=abc\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::InfoMsg { extra }) => {
+            assert_eq!(
+                extra,
+                "WEB_AUTH::https://auth.example.com/login?session=abc"
+            );
+        }
+        other => panic!("expected InfoMsg, got: {other:?}"),
+    }
+}
+
+#[test]
+fn infomsg_open_url() {
+    let msgs = decode_all(">INFOMSG:OPEN_URL:https://sso.example.com/auth\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::InfoMsg { extra }) => {
+            assert!(extra.starts_with("OPEN_URL:"));
+        }
+        other => panic!("expected InfoMsg, got: {other:?}"),
+    }
+}
+
+// ---  ---
+// NEED-CERTIFICATE as first-class notification
+// ---  ---
+
+#[test]
+fn need_certificate_notification() {
+    let msgs = decode_all(">NEED-CERTIFICATE:macosx-keychain:subject:o=OpenVPN-TEST\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::NeedCertificate { hint }) => {
+            assert_eq!(hint, "macosx-keychain:subject:o=OpenVPN-TEST");
+        }
+        other => panic!("expected NeedCertificate, got: {other:?}"),
+    }
+}
+
+#[test]
+fn need_certificate_empty_hint() {
+    let msgs = decode_all(">NEED-CERTIFICATE:\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::NeedCertificate { hint }) => {
+            assert_eq!(hint, "");
+        }
+        other => panic!("expected NeedCertificate, got: {other:?}"),
     }
 }

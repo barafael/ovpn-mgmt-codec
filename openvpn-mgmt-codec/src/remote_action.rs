@@ -8,6 +8,10 @@ pub enum RemoteAction {
     /// Skip this entry and advance to the next `--remote`.
     Skip,
 
+    /// Skip multiple remote entries (OpenVPN 2.6+, management version > 3).
+    /// Wire: `remote SKIP n` where n > 0.
+    SkipN(u32),
+
     /// Override the host and port.
     Modify {
         /// Replacement hostname or IP.

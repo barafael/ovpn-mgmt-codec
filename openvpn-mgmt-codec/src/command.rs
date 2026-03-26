@@ -161,6 +161,18 @@ pub enum OvpnCommand {
     /// Wire: `version`
     Version,
 
+    /// Set the management client version to announce feature support.
+    /// Wire: `version 2`
+    ///
+    /// Feature gates:
+    /// - version > 1: `>PK_SIGN:` notifications and `pk-sig` responses.
+    /// - version > 2: `>PK_SIGN:data,algorithm` includes the algorithm field.
+    /// - version >= 4: a `SUCCESS:` response is returned for the `version` command.
+    ///
+    /// **Note**: versions 1–3 produce no response; only version >= 4 returns
+    /// `SUCCESS:`. The codec tracks response expectations accordingly.
+    SetVersion(u32),
+
     /// Show the PID of the OpenVPN process.
     /// Wire: `pid`
     Pid,
@@ -520,6 +532,9 @@ impl OvpnCommand {
             // exit/quit close the connection.
             Self::Exit | Self::Quit => ResponseKind::NoResponse,
 
+            // `version N` for N < 4 produces no response; N >= 4 returns SUCCESS:.
+            Self::SetVersion(n) if *n < 4 => ResponseKind::NoResponse,
+
             // Everything else (including Raw) produces SUCCESS: or ERROR:.
             _ => ResponseKind::SuccessOrError,
         }
@@ -565,7 +580,14 @@ impl FromStr for OvpnCommand {
 
         match cmd {
             // --- Informational ---
-            "version" => Ok(Self::Version),
+            "version" if args.is_empty() => Ok(Self::Version),
+            "version" => Ok(Self::SetVersion(args.parse().map_err(|_| {
+                CommandParseError::InvalidChoice {
+                    field: "version number",
+                    input: args.to_string(),
+                    hint: "expected a positive integer (e.g. version 2)",
+                }
+            })?)),
             "pid" => Ok(Self::Pid),
             "help" => Ok(Self::Help),
             "net" => Ok(Self::Net),
@@ -847,13 +869,20 @@ impl FromStr for OvpnCommand {
             "remote" => match args.split_whitespace().collect::<Vec<_>>().as_slice() {
                 ["accept" | "ACCEPT"] => Ok(Self::Remote(RemoteAction::Accept)),
                 ["skip" | "SKIP"] => Ok(Self::Remote(RemoteAction::Skip)),
+                ["skip" | "SKIP", n] => Ok(Self::Remote(RemoteAction::SkipN(n.parse().map_err(
+                    |_| CommandParseError::InvalidChoice {
+                        field: "remote skip count",
+                        input: n.to_string(),
+                        hint: "expected a positive integer (e.g. remote SKIP 3)",
+                    },
+                )?))),
                 ["mod" | "MOD", host, port] => Ok(Self::Remote(RemoteAction::Modify {
                     host: host.to_string(),
                     port: port
                         .parse()
                         .map_err(|_| CommandParseError::MissingArgs("port must be a number"))?,
                 })),
-                _ => cmd_err("usage: remote accept|skip|mod <host> <port>"),
+                _ => cmd_err("usage: remote accept|skip [n]|mod <host> <port>"),
             },
 
             "proxy" => match args.split_whitespace().collect::<Vec<_>>().as_slice() {
