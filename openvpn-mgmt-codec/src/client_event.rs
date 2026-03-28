@@ -55,3 +55,65 @@ impl FromStr for ClientEvent {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_all_known_variants() {
+        assert_eq!(
+            "CONNECT".parse::<ClientEvent>().unwrap(),
+            ClientEvent::Connect
+        );
+        assert_eq!(
+            "REAUTH".parse::<ClientEvent>().unwrap(),
+            ClientEvent::Reauth
+        );
+        assert_eq!(
+            "ESTABLISHED".parse::<ClientEvent>().unwrap(),
+            ClientEvent::Established
+        );
+        assert_eq!(
+            "DISCONNECT".parse::<ClientEvent>().unwrap(),
+            ClientEvent::Disconnect
+        );
+    }
+
+    #[test]
+    fn display_roundtrip() {
+        for variant in [
+            ClientEvent::Connect,
+            ClientEvent::Reauth,
+            ClientEvent::Established,
+            ClientEvent::Disconnect,
+        ] {
+            let s = variant.to_string();
+            assert_eq!(s.parse::<ClientEvent>().unwrap(), variant);
+        }
+    }
+
+    #[test]
+    fn unknown_string_is_err() {
+        assert!("BOGUS".parse::<ClientEvent>().is_err());
+        assert!("connect".parse::<ClientEvent>().is_err()); // case-sensitive
+    }
+
+    #[test]
+    fn cr_response_not_recognised_by_from_str() {
+        // CR_RESPONSE is handled separately in the codec; FromStr rejects it.
+        assert!("CR_RESPONSE".parse::<ClientEvent>().is_err());
+    }
+
+    #[test]
+    fn display_cr_response() {
+        let cr = ClientEvent::CrResponse("abc".to_string());
+        assert_eq!(cr.to_string(), "CR_RESPONSE");
+    }
+
+    #[test]
+    fn display_unknown() {
+        let u = ClientEvent::Unknown("FUTURE".to_string());
+        assert_eq!(u.to_string(), "FUTURE");
+    }
+}

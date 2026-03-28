@@ -65,7 +65,7 @@ pub(crate) struct StartupOptions {
     pub log: StartupStreamMode,
     pub state: StartupStreamMode,
     pub echo: StartupStreamMode,
-    pub bytecount_interval: String,
+    pub bytecount_interval: u32,
     pub hold_release: bool,
     pub query_version: bool,
 }
@@ -76,7 +76,7 @@ impl Default for StartupOptions {
             log: StartupStreamMode::On,
             state: StartupStreamMode::On,
             echo: StartupStreamMode::Off,
-            bytecount_interval: "2".to_string(),
+            bytecount_interval: 2,
             hold_release: true,
             query_version: true,
         }

@@ -25,7 +25,7 @@ Add the crate to your project:
 
 ```toml
 [dependencies]
-openvpn-mgmt-codec = "0.5"
+openvpn-mgmt-codec = "0.7"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 ```

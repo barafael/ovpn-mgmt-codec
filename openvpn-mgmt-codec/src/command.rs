@@ -43,15 +43,23 @@ fn next_token(input: &str) -> Option<(String, &str)> {
         // Quoted token: consume until unescaped closing quote.
         let mut chars = quoted.chars();
         let mut token = String::new();
+        let mut closed = false;
         loop {
             match chars.next() {
-                None | Some('"') => break,
+                None => break,
+                Some('"') => {
+                    closed = true;
+                    break;
+                }
                 Some('\\') => match chars.next() {
                     Some(escaped) => token.push(escaped),
                     None => break,
                 },
                 Some(plain) => token.push(plain),
             }
+        }
+        if !closed {
+            return None;
         }
         let rest = chars.as_str().trim_start();
         Some((token, rest))
@@ -1418,6 +1426,12 @@ mod tests {
         let (tok, rest) = next_token("onlyone").unwrap();
         assert_eq!(tok, "onlyone");
         assert_eq!(rest, "");
+    }
+
+    #[test]
+    fn next_token_unclosed_quote_returns_none() {
+        assert!(next_token(r#""unclosed string"#).is_none());
+        assert!(next_token(r#""trailing backslash\"#).is_none());
     }
 
     // --- FromStr: authentication ---

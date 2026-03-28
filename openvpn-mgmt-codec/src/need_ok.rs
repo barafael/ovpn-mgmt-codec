@@ -8,3 +8,18 @@ pub enum NeedOkResponse {
     /// Reject the prompt.
     Cancel,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_ok() {
+        assert_eq!(NeedOkResponse::Ok.to_string(), "ok");
+    }
+
+    #[test]
+    fn display_cancel() {
+        assert_eq!(NeedOkResponse::Cancel.to_string(), "cancel");
+    }
+}

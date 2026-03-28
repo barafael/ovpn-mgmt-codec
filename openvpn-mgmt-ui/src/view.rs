@@ -298,7 +298,7 @@ impl App {
         // -- Streaming controls (always visible) -------------------------
         let mut bytecount_row = row![
             text("ByteCount").size(12).style(text_label).width(65),
-            text_input("sec", &startup.bytecount_interval)
+            text_input("sec", &startup.bytecount_interval.to_string())
                 .on_input(|value| { Message::Startup(StartupMsg::ByteCountIntervalChanged(value)) })
                 .width(50)
                 .size(12),

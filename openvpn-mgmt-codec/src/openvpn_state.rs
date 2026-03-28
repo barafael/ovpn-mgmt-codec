@@ -72,3 +72,61 @@ impl FromStr for OpenVpnState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ALL_KNOWN: &[(&str, OpenVpnState)] = &[
+        ("CONNECTING", OpenVpnState::Connecting),
+        ("WAIT", OpenVpnState::Wait),
+        ("AUTH", OpenVpnState::Auth),
+        ("GET_CONFIG", OpenVpnState::GetConfig),
+        ("ASSIGN_IP", OpenVpnState::AssignIp),
+        ("ADD_ROUTES", OpenVpnState::AddRoutes),
+        ("CONNECTED", OpenVpnState::Connected),
+        ("RECONNECTING", OpenVpnState::Reconnecting),
+        ("EXITING", OpenVpnState::Exiting),
+        ("TCP_CONNECT", OpenVpnState::TcpConnect),
+        ("RESOLVE", OpenVpnState::Resolve),
+        ("AUTH_PENDING", OpenVpnState::AuthPending),
+    ];
+
+    #[test]
+    fn parse_all_known_states() {
+        for (wire, expected) in ALL_KNOWN {
+            assert_eq!(
+                wire.parse::<OpenVpnState>().unwrap(),
+                *expected,
+                "failed for {wire}"
+            );
+        }
+    }
+
+    #[test]
+    fn display_roundtrip() {
+        for (_, variant) in ALL_KNOWN {
+            let s = variant.to_string();
+            assert_eq!(s.parse::<OpenVpnState>().unwrap(), *variant);
+        }
+    }
+
+    #[test]
+    fn unknown_state_is_err() {
+        assert!("BOGUS".parse::<OpenVpnState>().is_err());
+        assert!("connected".parse::<OpenVpnState>().is_err()); // case-sensitive
+    }
+
+    #[test]
+    fn display_unknown() {
+        let u = OpenVpnState::Unknown("FUTURE_STATE".to_string());
+        assert_eq!(u.to_string(), "FUTURE_STATE");
+    }
+
+    #[test]
+    fn error_preserves_input() {
+        let err = "NOPE".parse::<OpenVpnState>().unwrap_err();
+        assert_eq!(err.0, "NOPE");
+        assert!(err.to_string().contains("NOPE"));
+    }
+}

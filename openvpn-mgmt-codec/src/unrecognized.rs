@@ -15,3 +15,20 @@ pub enum UnrecognizedKind {
     #[error("expected SUCCESS/ERROR response, got unrecognized line")]
     UnexpectedLine,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_notification_display() {
+        let err = UnrecognizedKind::MalformedNotification;
+        assert!(err.to_string().contains("missing ':'"));
+    }
+
+    #[test]
+    fn unexpected_line_display() {
+        let err = UnrecognizedKind::UnexpectedLine;
+        assert!(err.to_string().contains("unrecognized line"));
+    }
+}

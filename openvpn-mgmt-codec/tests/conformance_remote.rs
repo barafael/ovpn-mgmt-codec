@@ -93,3 +93,125 @@ async fn remote_accept() {
     framed.send(OvpnCommand::Exit).await.unwrap();
     eprintln!("=== remote conformance test complete ===");
 }
+
+/// Respond to `>REMOTE:` with `Modify` to override the host and port.
+///
+/// The client should proceed to resolve/connect using the overridden values.
+/// Since we redirect to the same server, the connection should still proceed.
+#[tokio::test]
+#[traced_test]
+async fn remote_modify() {
+    let mut framed = connect_and_auth(CLIENT_REMOTE_ADDR).await;
+    eprintln!("=== authenticated to client-remote management ===");
+
+    send_ok(&mut framed, OvpnCommand::StateStream(StreamMode::On), "").await;
+    send_ok(&mut framed, OvpnCommand::HoldRelease, "hold release").await;
+    eprintln!("=== hold released, waiting for >REMOTE: ===");
+
+    let (host, _port, _protocol) = timeout(MSG_TIMEOUT, async {
+        loop {
+            let msg = recv_raw(&mut framed).await;
+            if let OvpnMessage::Notification(Notification::Remote {
+                host,
+                port,
+                protocol,
+            }) = msg
+            {
+                return (host, port, protocol);
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for >REMOTE: notification");
+
+    // Override with the same host but explicit port — connection should proceed.
+    send_ok(
+        &mut framed,
+        OvpnCommand::Remote(RemoteAction::Modify {
+            host: host.clone(),
+            port: 1194,
+        }),
+        "",
+    )
+    .await;
+    eprintln!("=== Remote(Modify {{ host={host}, port=1194 }}) sent ===");
+
+    // Expect state transitions after the modified remote is used.
+    let mut states = Vec::new();
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let msg = recv_raw(&mut framed).await;
+            if let OvpnMessage::Notification(Notification::State { name, .. }) = msg {
+                states.push(name);
+            }
+        }
+    })
+    .await
+    .ok();
+
+    assert!(
+        !states.is_empty(),
+        "should observe state transitions after Remote(Modify)",
+    );
+    eprintln!("=== states after modify: {states:?} ===");
+
+    framed.send(OvpnCommand::Exit).await.unwrap();
+    eprintln!("=== remote_modify conformance test complete ===");
+}
+
+/// Respond to `>REMOTE:` with `Skip` to skip the current entry.
+///
+/// With only one `--remote` configured, skipping should cause the client
+/// to cycle back and re-query, or fail. Either way the codec must handle
+/// it without panicking.
+#[tokio::test]
+#[traced_test]
+async fn remote_skip() {
+    let mut framed = connect_and_auth(CLIENT_REMOTE_ADDR).await;
+    eprintln!("=== authenticated to client-remote management ===");
+
+    send_ok(&mut framed, OvpnCommand::StateStream(StreamMode::On), "").await;
+    send_ok(&mut framed, OvpnCommand::HoldRelease, "hold release").await;
+    eprintln!("=== hold released, waiting for >REMOTE: ===");
+
+    // Wait for the first >REMOTE: notification.
+    timeout(MSG_TIMEOUT, async {
+        loop {
+            let msg = recv_raw(&mut framed).await;
+            if matches!(msg, OvpnMessage::Notification(Notification::Remote { .. })) {
+                return;
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for >REMOTE: notification");
+
+    // Skip the entry — OpenVPN should cycle to the next remote (or re-query).
+    send_ok(&mut framed, OvpnCommand::Remote(RemoteAction::Skip), "").await;
+    eprintln!("=== Remote(Skip) sent ===");
+
+    // Collect whatever happens next — another >REMOTE: or state changes.
+    let mut saw_remote_or_state = false;
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let msg = recv_raw(&mut framed).await;
+            match msg {
+                OvpnMessage::Notification(Notification::Remote { .. })
+                | OvpnMessage::Notification(Notification::State { .. }) => {
+                    saw_remote_or_state = true;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .ok();
+
+    assert!(
+        saw_remote_or_state,
+        "should observe either another >REMOTE: or state transitions after Skip",
+    );
+    eprintln!("=== remote_skip conformance test complete ===");
+
+    framed.send(OvpnCommand::Exit).await.unwrap();
+}

@@ -687,6 +687,7 @@ impl App {
                 ..
             } => {
                 tracing::info!(%name, %description, "vpn state changed");
+                let log_line = format!("State → {name} — {description}");
                 self.vpn_state = Some(name);
                 self.vpn_state_description = Some(description.clone());
                 self.local_ip = if local_ip.is_empty() {
@@ -701,22 +702,15 @@ impl App {
                 } else {
                     Some(remote_ip.clone())
                 };
-                self.add_log(
-                    LogLevel::Info,
-                    &format_timestamp(timestamp),
-                    &format!(
-                        "State → {} — {description}",
-                        self.vpn_state.as_ref().unwrap()
-                    ),
-                );
+                self.add_log(LogLevel::Info, &format_timestamp(timestamp), &log_line);
             }
             Notification::ByteCount {
                 bytes_in,
                 bytes_out,
             } => {
                 // Feed the throughput chart before overwriting the totals.
-                let interval = self.startup.bytecount_interval.parse::<u32>().unwrap_or(2);
-                self.throughput.push(bytes_in, bytes_out, interval);
+                self.throughput
+                    .push(bytes_in, bytes_out, self.startup.bytecount_interval);
                 self.bytes_in = bytes_in;
                 self.bytes_out = bytes_out;
             }
@@ -928,15 +922,16 @@ impl App {
                 self.apply_stream_mode("echo", mode, OvpnCommand::Echo)?;
             }
             StartupMsg::ByteCountIntervalChanged(value) => {
-                self.startup.bytecount_interval = value;
+                if let Ok(seconds) = value.parse::<u32>() {
+                    self.startup.bytecount_interval = seconds;
+                }
             }
             StartupMsg::ByteCountApply => {
-                if let Ok(seconds) = self.startup.bytecount_interval.parse::<u32>() {
-                    self.send_if_connected(
-                        &format!("bytecount {seconds}"),
-                        OvpnCommand::ByteCount(seconds),
-                    )?;
-                }
+                let seconds = self.startup.bytecount_interval;
+                self.send_if_connected(
+                    &format!("bytecount {seconds}"),
+                    OvpnCommand::ByteCount(seconds),
+                )?;
             }
             StartupMsg::ByteCountOff => {
                 self.send_if_connected("bytecount 0", OvpnCommand::ByteCount(0))?;
@@ -1267,10 +1262,8 @@ impl App {
         // even if no >STATE: transition fires during connect.
         commands.push(OvpnCommand::State);
 
-        if let Ok(seconds) = self.startup.bytecount_interval.parse::<u32>()
-            && seconds > 0
-        {
-            commands.push(OvpnCommand::ByteCount(seconds));
+        if self.startup.bytecount_interval > 0 {
+            commands.push(OvpnCommand::ByteCount(self.startup.bytecount_interval));
         }
 
         if self.startup.hold_release {

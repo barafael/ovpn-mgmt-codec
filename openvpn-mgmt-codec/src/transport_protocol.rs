@@ -33,3 +33,70 @@ impl FromStr for TransportProtocol {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_lowercase() {
+        assert_eq!(
+            "udp".parse::<TransportProtocol>().unwrap(),
+            TransportProtocol::Udp
+        );
+        assert_eq!(
+            "tcp".parse::<TransportProtocol>().unwrap(),
+            TransportProtocol::Tcp
+        );
+    }
+
+    #[test]
+    fn parse_uppercase() {
+        assert_eq!(
+            "UDP".parse::<TransportProtocol>().unwrap(),
+            TransportProtocol::Udp
+        );
+        assert_eq!(
+            "TCP".parse::<TransportProtocol>().unwrap(),
+            TransportProtocol::Tcp
+        );
+    }
+
+    #[test]
+    fn mixed_case_is_err() {
+        assert!("Udp".parse::<TransportProtocol>().is_err());
+        assert!("Tcp".parse::<TransportProtocol>().is_err());
+    }
+
+    #[test]
+    fn display_roundtrip() {
+        // strum Display serializes as lowercase
+        assert_eq!(TransportProtocol::Udp.to_string(), "udp");
+        assert_eq!(TransportProtocol::Tcp.to_string(), "tcp");
+        assert_eq!(
+            "udp".parse::<TransportProtocol>().unwrap(),
+            TransportProtocol::Udp
+        );
+        assert_eq!(
+            "tcp".parse::<TransportProtocol>().unwrap(),
+            TransportProtocol::Tcp
+        );
+    }
+
+    #[test]
+    fn unknown_protocol_is_err() {
+        assert!("sctp".parse::<TransportProtocol>().is_err());
+    }
+
+    #[test]
+    fn display_unknown() {
+        let u = TransportProtocol::Unknown("quic".to_string());
+        assert_eq!(u.to_string(), "quic");
+    }
+
+    #[test]
+    fn error_preserves_input() {
+        let err = "sctp".parse::<TransportProtocol>().unwrap_err();
+        assert_eq!(err.0, "sctp");
+    }
+}
