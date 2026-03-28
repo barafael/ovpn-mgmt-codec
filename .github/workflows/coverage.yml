@@ -15,6 +15,7 @@ env:
 jobs:
   coverage:
     runs-on: ubuntu-latest
+    environment: coverage
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -25,9 +26,9 @@ jobs:
         run: rustup toolchain install stable --component llvm-tools-preview
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@735e5933943122c5ac182670a935f54a949265e1 # v2
-        with:
-          tool: cargo-llvm-cov
+        run: |
+          curl -LsSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar xzf - -C "$HOME/.cargo/bin"
+          cargo binstall --no-confirm cargo-llvm-cov
 
       - name: Generate coverage
         run: cargo llvm-cov --workspace --lcov --output-path lcov.info
