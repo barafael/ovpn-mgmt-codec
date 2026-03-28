@@ -205,6 +205,41 @@ for cmd in cmds {
 }
 ```
 
+### `ManagementClient` ([client](src/client.rs))
+
+High-level client that separates command responses from async notifications.
+Command methods return parsed responses directly; notifications are forwarded
+to a caller-provided `broadcast::Sender<Notification>`.
+
+```rust
+use tokio::sync::broadcast;
+use openvpn_mgmt_codec::{Notification, ManagementClient, StatusFormat};
+
+let (notification_tx, _) = broadcast::channel::<Notification>(256);
+let mut rx = notification_tx.subscribe();
+let mut client = ManagementClient::new(framed, notification_tx);
+
+let version = client.version().await?;
+let status = client.status(StatusFormat::V3).await?;
+client.hold_release().await?;
+```
+
+### Timestamp formatting ([timestamp](src/timestamp.rs))
+
+Lightweight UTC timestamp formatting without external dependencies:
+
+```rust
+use openvpn_mgmt_codec::timestamp::{format_utc, format_local_style};
+
+assert_eq!(format_utc(1_711_031_400), "2024-03-21T14:30:00Z");
+assert_eq!(format_local_style(1_711_031_400), "2024-03-21 14:30:00");
+```
+
+### `StreamMode` now derives `Copy`
+
+`StreamMode` is now `Copy`, and gains a `returns_history()` method that
+indicates whether the mode produces a multi-line history dump.
+
 ## Behavioral changes
 
 - **Command pipelining**: The codec now uses an internal queue for expected
@@ -222,4 +257,5 @@ for cmd in cmds {
 
 - `bon` — builder derives for `ClientDeny` and `Crv1Challenge`
 - `base64` — CRV1 challenge encoding
-- `futures-core`, `pin-project-lite` — `ClassifyExt` stream adapter
+- `futures-core`, `futures-util`, `pin-project-lite` — `ClassifyExt` stream adapter and `ManagementClient`
+- `tokio` (sync feature) — `broadcast` channel for `ManagementClient`
