@@ -227,6 +227,29 @@ fn parse_optional_u64(s: &str) -> Option<u64> {
 /// V1 format starts with `"OpenVPN CLIENT LIST"` and has a fixed column
 /// layout with fewer fields. V2/V3 use `TITLE`/`TIME`/`HEADER`/`CLIENT_LIST`
 /// prefix markers.
+///
+/// # Examples
+///
+/// ```
+/// use openvpn_mgmt_codec::status::parse_status;
+///
+/// let lines: Vec<String> = vec![
+///     "TITLE\tOpenVPN 2.6.8",
+///     "TIME\t2024-03-21 14:30:00\t1711031400",
+///     "HEADER\tCLIENT_LIST\tCommon Name\tReal Address\tVirtual Address\tVirtual IPv6 Address\tBytes Received\tBytes Sent\tConnected Since\tConnected Since (time_t)\tUsername\tClient ID\tPeer ID\tData Channel Cipher",
+///     "CLIENT_LIST\tpeer1\t203.0.113.10:52841\t10.8.0.6\t\t1548576\t984320\t2024-03-21 09:15:00\t1711012500\tUNDEF\t0\t0\tAES-256-GCM",
+///     "HEADER\tROUTING_TABLE\tVirtual Address\tCommon Name\tReal Address\tLast Ref\tLast Ref (time_t)",
+///     "ROUTING_TABLE\t10.8.0.6\tpeer1\t203.0.113.10:52841\t2024-03-21 14:29:50\t1711031390",
+///     "GLOBAL_STATS\tMax bcast/mcast queue length\t3",
+/// ].into_iter().map(String::from).collect();
+///
+/// let status = parse_status(&lines).unwrap();
+/// assert_eq!(status.title.as_deref(), Some("OpenVPN 2.6.8"));
+/// assert_eq!(status.clients.len(), 1);
+/// assert_eq!(status.clients[0].common_name, "peer1");
+/// assert_eq!(status.clients[0].bytes_in, 1548576);
+/// assert_eq!(status.routes[0].virtual_address, "10.8.0.6");
+/// ```
 pub fn parse_status(lines: &[String]) -> Result<StatusResponse, ParseStatusError> {
     // Detect V1 by looking for the header line.
     if lines
@@ -450,6 +473,27 @@ fn parse_status_v2v3(lines: &[String], sep: char) -> Result<StatusResponse, Pars
 ///
 /// Client mode returns `OpenVPN STATISTICS` — a simple key-value list.
 /// The first line is the header, the second is `Updated,...`.
+///
+/// # Examples
+///
+/// ```
+/// use openvpn_mgmt_codec::status::parse_client_statistics;
+///
+/// let lines: Vec<String> = vec![
+///     "OpenVPN STATISTICS",
+///     "Updated,2024-03-21 14:30:00",
+///     "TUN/TAP read bytes,1548576",
+///     "TUN/TAP write bytes,984320",
+///     "TCP/UDP read bytes,1600000",
+///     "TCP/UDP write bytes,1020000",
+///     "Auth read bytes,0",
+/// ].into_iter().map(String::from).collect();
+///
+/// let stats = parse_client_statistics(&lines).unwrap();
+/// assert_eq!(stats.tun_tap_read_bytes, 1548576);
+/// assert_eq!(stats.tcp_udp_write_bytes, 1020000);
+/// assert!(stats.pre_compress_bytes.is_none());
+/// ```
 pub fn parse_client_statistics(lines: &[String]) -> Result<ClientStatistics, ParseStatusError> {
     let mut stats = ClientStatistics::default();
     let mut found_tun_read = false;

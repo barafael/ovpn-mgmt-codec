@@ -65,6 +65,35 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
+## Choosing an API level
+
+The crate offers two ways to talk to OpenVPN:
+
+| API | When to use |
+| --- | --- |
+| **`ManagementClient`** | Most applications. Sends commands and returns typed responses; dispatches notifications to a `broadcast` channel. See the [`client`](https://docs.rs/openvpn-mgmt-codec/latest/openvpn_mgmt_codec/client/) module. |
+| **`Framed<T, OvpnCodec>`** | When you need full control over the stream (custom backpressure, multiplexing, or integration with an existing tower/axum stack). |
+
+Both layers share the same `OvpnCommand` / `OvpnMessage` types.
+
+### Startup helpers
+
+`connection_sequence` and `server_connection_sequence` return the
+commands that a management client typically sends right after connecting
+(enable log/state streaming, request PID, start byte-count
+notifications, release the hold). Use them to avoid hand-rolling the
+same boilerplate:
+
+```rust,no_run
+use openvpn_mgmt_codec::command::{connection_sequence, server_connection_sequence};
+
+// Client mode — bytecount every 5 s
+let cmds = connection_sequence(5);
+
+// Server mode — bytecount every 5 s, env-filter level 0 (all vars)
+let cmds = server_connection_sequence(5, 0);
+```
+
 ## How it works
 
 `OvpnCodec` implements `Encoder<OvpnCommand>` and `Decoder` (Item =

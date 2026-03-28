@@ -17,7 +17,7 @@
 //! use openvpn_mgmt_codec::{Notification, OvpnCodec, StatusFormat};
 //! use openvpn_mgmt_codec::client::ManagementClient;
 //!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! # async fn example() -> anyhow::Result<()> {
 //! let stream = TcpStream::connect("127.0.0.1:7505").await?;
 //! let framed = Framed::new(stream, OvpnCodec::new());
 //!
@@ -218,7 +218,7 @@ where
 
     /// Query the connection status in the given format.
     ///
-    /// Returns the raw multi-line response. Use [`status_parsed`](Self::status_parsed)
+    /// Returns the raw multi-line response. Use [`status`](Self::status)
     /// for a typed result.
     pub async fn status_raw(&mut self, format: StatusFormat) -> Result<Vec<String>, ClientError> {
         self.send_expect_multi_line(OvpnCommand::Status(format))
