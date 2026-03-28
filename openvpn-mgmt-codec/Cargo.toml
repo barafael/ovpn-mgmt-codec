@@ -13,9 +13,11 @@ bon = "3"
 bytes = "1"
 derive_more = { version = "1", features = ["debug", "display"] }
 futures-core = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 pin-project-lite = "0.2"
 strum = { version = "0.27", features = ["derive"] }
 thiserror = "2"
+tokio = { version = "1", features = ["sync"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tracing = "0.1"
 

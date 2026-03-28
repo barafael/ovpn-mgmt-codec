@@ -9,7 +9,7 @@ pub struct ParseStreamModeError(pub String);
 /// Mode selector for commands that share the on/off/all/on-all/N grammar.
 /// This is used by `log`, `state`, and `echo`, all of which support
 /// identical sub-commands.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamMode {
     /// Enable real-time notifications.
     On,
@@ -27,6 +27,14 @@ pub enum StreamMode {
 
     /// Show the N most recent history entries.
     Recent(u32),
+}
+
+impl StreamMode {
+    /// Whether this mode produces a multi-line history dump rather than a
+    /// simple `SUCCESS:` acknowledgement.
+    pub fn returns_history(self) -> bool {
+        matches!(self, Self::All | Self::OnAll | Self::Recent(_))
+    }
 }
 
 impl fmt::Display for StreamMode {

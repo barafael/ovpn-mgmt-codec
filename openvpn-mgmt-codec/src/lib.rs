@@ -4,6 +4,8 @@
 
 /// Authentication credential types and retry strategies.
 pub mod auth;
+/// High-level management client with notification dispatch.
+pub mod client;
 /// Typed client-deny command with builder support.
 pub mod client_deny;
 /// Client notification event types (CONNECT, REAUTH, etc.).
@@ -71,6 +73,7 @@ pub use unrecognized::UnrecognizedKind;
 pub use version_info::VersionInfo;
 
 // Re-export key items from sub-modules for convenience.
+pub use client::{ClientError, ManagementClient};
 pub use command::{connection_sequence, server_connection_sequence};
 pub use parsed_response::{LoadStats, ParseResponseError, StateEntry};
 pub use status::{
