@@ -11,7 +11,7 @@ categories = ["network-programming", "encoding"]
 
 [dependencies]
 base64 = "0.22"
-better_default = "1.0.5"
+better_default = "1"
 bon = "3"
 bytes = "1"
 derive_more = { version = "1", features = ["debug", "display"] }
