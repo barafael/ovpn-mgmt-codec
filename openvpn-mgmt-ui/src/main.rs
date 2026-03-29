@@ -1365,4 +1365,4 @@ impl App {
     }
 }
 
-use openvpn_mgmt_codec::timestamp::format_local_style as format_timestamp;
+use openvpn_mgmt_codec::timestamp::format_timestamp;

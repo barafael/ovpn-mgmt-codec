@@ -43,7 +43,7 @@ pub fn format_utc(ts: u64) -> String {
 /// Format a Unix timestamp with a space separator: `2024-03-21 14:30:00`.
 ///
 /// Returns an empty string for timestamp `0` (unset).
-pub fn format_local_style(ts: u64) -> String {
+pub fn format_timestamp(ts: u64) -> String {
     if ts == 0 {
         return String::new();
     }
@@ -76,7 +76,7 @@ pub fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
 
 /// A Unix timestamp that implements [`Display`](fmt::Display) using
 /// [`format_utc`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UtcTimestamp(pub u64);
 
 impl fmt::Display for UtcTimestamp {
@@ -122,8 +122,8 @@ mod tests {
     }
 
     #[test]
-    fn format_local_style_known_date() {
-        assert_eq!(format_local_style(1_711_031_400), "2024-03-21 14:30:00");
+    fn format_timestamp_known_date() {
+        assert_eq!(format_timestamp(1_711_031_400), "2024-03-21 14:30:00");
     }
 
     #[test]
@@ -158,5 +158,10 @@ mod tests {
             "2024-03-21T14:30:00Z"
         );
         assert_eq!(UtcTimestamp(0).to_string(), "");
+    }
+
+    #[test]
+    fn format_timestamp_zero_returns_empty() {
+        assert_eq!(format_timestamp(0), "");
     }
 }

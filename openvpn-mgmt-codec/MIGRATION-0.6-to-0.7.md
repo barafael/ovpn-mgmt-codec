@@ -229,10 +229,10 @@ client.hold_release().await?;
 Lightweight UTC timestamp formatting without external dependencies:
 
 ```rust
-use openvpn_mgmt_codec::timestamp::{format_utc, format_local_style};
+use openvpn_mgmt_codec::timestamp::{format_utc, format_timestamp};
 
 assert_eq!(format_utc(1_711_031_400), "2024-03-21T14:30:00Z");
-assert_eq!(format_local_style(1_711_031_400), "2024-03-21 14:30:00");
+assert_eq!(format_timestamp(1_711_031_400), "2024-03-21 14:30:00");
 ```
 
 ### `StreamMode` now derives `Copy`

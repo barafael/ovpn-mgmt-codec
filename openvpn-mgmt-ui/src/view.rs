@@ -7,8 +7,8 @@ use iced::widget::{
 use iced::{Element, Font, Length, Padding, Theme};
 use iced_anim::widget::button::{self, button};
 use iced_aw::{TabLabel, Tabs};
-use lucide_icons::Icon as LucideIcon;
-use lucide_icons::iced as lucide;
+use lucide_icons::Icon;
+use lucide_icons::iced::{icon_plug, icon_refresh_cw, icon_send_horizontal, icon_unplug};
 
 use openvpn_mgmt_codec::LogLevel;
 
@@ -54,28 +54,28 @@ impl App {
                 Tabs::new(Message::TabSelected)
                     .push(
                         Tab::Dashboard,
-                        TabLabel::IconText(LucideIcon::Activity.unicode(), "Dashboard".into()),
+                        TabLabel::IconText(Icon::Activity.unicode(), "Dashboard".into()),
                         self.view_tab_dashboard(),
                     )
                     .push(
                         Tab::Log,
-                        TabLabel::IconText(LucideIcon::ScrollText.unicode(), "Log".into()),
+                        TabLabel::IconText(Icon::ScrollText.unicode(), "Log".into()),
                         self.view_tab_log(),
                     )
                     .push(
                         Tab::Console,
-                        TabLabel::IconText(LucideIcon::Terminal.unicode(), "Console".into()),
+                        TabLabel::IconText(Icon::Terminal.unicode(), "Console".into()),
                         self.view_tab_console(),
                     )
                     .push(
                         Tab::Clients,
-                        TabLabel::IconText(LucideIcon::Users.unicode(), "Clients".into()),
+                        TabLabel::IconText(Icon::Users.unicode(), "Clients".into()),
                         self.view_tab_clients(),
                     )
                     .push(
                         Tab::Help,
                         TabLabel::IconText(
-                            LucideIcon::CircleQuestionMark.unicode(),
+                            Icon::CircleQuestionMark.unicode(),
                             "Command Help".into(),
                         ),
                         self.view_tab_help(),
@@ -136,7 +136,7 @@ impl App {
         let connect_btn: Element<'_, Message> = if is_connected {
             row![
                 button(
-                    row![lucide::icon_unplug().size(14), text("Disconnect").size(14),]
+                    row![icon_unplug().size(14), text("Disconnect").size(14),]
                         .spacing(6)
                         .align_y(iced::Alignment::Center),
                 )
@@ -144,12 +144,9 @@ impl App {
                 .style(button::danger)
                 .width(Length::Fill),
                 button(
-                    row![
-                        lucide::icon_refresh_cw().size(14),
-                        text("Reconnect").size(14),
-                    ]
-                    .spacing(6)
-                    .align_y(iced::Alignment::Center),
+                    row![icon_refresh_cw().size(14), text("Reconnect").size(14),]
+                        .spacing(6)
+                        .align_y(iced::Alignment::Center),
                 )
                 .on_press(Message::Reconnect)
                 .style(button::secondary)
@@ -160,7 +157,7 @@ impl App {
         } else {
             let can_connect = !is_connecting && !self.host.is_empty() && !self.port.is_empty();
             button(
-                row![lucide::icon_plug().size(14), text("Connect").size(14),]
+                row![icon_plug().size(14), text("Connect").size(14),]
                     .spacing(6)
                     .align_y(iced::Alignment::Center),
             )
@@ -198,7 +195,7 @@ impl App {
                 Space::new().height(4),
                 with_tooltip(
                     button(
-                        row![lucide::icon_refresh_cw().size(14), text("Refresh").size(14),]
+                        row![icon_refresh_cw().size(14), text("Refresh").size(14),]
                             .spacing(6)
                             .align_y(iced::Alignment::Center),
                     )
@@ -456,12 +453,9 @@ impl App {
             .on_submit(Message::SendCommand)
             .size(13),
             button(
-                row![
-                    lucide::icon_send_horizontal().size(14),
-                    text("Send").size(14),
-                ]
-                .spacing(4)
-                .align_y(iced::Alignment::Center),
+                row![icon_send_horizontal().size(14), text("Send").size(14),]
+                    .spacing(4)
+                    .align_y(iced::Alignment::Center),
             )
             .on_press_maybe(self.command_valid.then_some(Message::SendCommand))
             .style(button::primary),

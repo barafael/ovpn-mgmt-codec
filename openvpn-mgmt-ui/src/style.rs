@@ -5,13 +5,13 @@
 
 use iced::widget::{container, text};
 use iced::{Border, Color, Theme};
-use iced_aw::style::{Status as TabStatus, tab_bar};
+use iced_aw::style::{Status, tab_bar};
 
 // -------------------------------------------------------------------
 // Tab bar
 // -------------------------------------------------------------------
 
-pub(crate) fn tab_style(theme: &Theme, status: TabStatus) -> tab_bar::Style {
+pub(crate) fn tab_style(theme: &Theme, status: Status) -> tab_bar::Style {
     let palette = theme.extended_palette();
     let background = palette.background.base.color;
     let foreground = palette.background.base.text;
@@ -31,12 +31,12 @@ pub(crate) fn tab_style(theme: &Theme, status: TabStatus) -> tab_bar::Style {
     };
 
     match status {
-        TabStatus::Active => tab_bar::Style {
+        Status::Active => tab_bar::Style {
             tab_label_background: mix(background, foreground, 0.08).into(),
             text_color: foreground,
             ..base
         },
-        TabStatus::Hovered => tab_bar::Style {
+        Status::Hovered => tab_bar::Style {
             tab_label_background: mix(background, foreground, 0.06).into(),
             text_color: mix(foreground, background, 0.15),
             ..base

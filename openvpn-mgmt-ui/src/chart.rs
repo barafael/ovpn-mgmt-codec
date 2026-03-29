@@ -2,8 +2,9 @@
 
 use std::collections::VecDeque;
 
-use iced::{Color as IcedColor, Element, Length, Theme};
+use iced::{Color, Element, Length, Theme};
 use plotters::prelude::*;
+use plotters::style::Color as _;
 use plotters_iced2::{Chart, ChartWidget};
 
 use crate::message::Message;
@@ -34,7 +35,7 @@ impl ChartPalette {
     }
 }
 
-fn to_rgb(c: IcedColor) -> RGBColor {
+fn to_rgb(c: Color) -> RGBColor {
     RGBColor(
         (c.r * 255.0) as u8,
         (c.g * 255.0) as u8,
@@ -142,7 +143,13 @@ impl Chart<Message> for ThroughputChart<'_> {
         _state: &Self::State,
         root: DrawingArea<DB, plotters::coord::Shift>,
     ) {
-        let ChartPalette { background, fg_muted, green, blue, grid } = self.palette;
+        let ChartPalette {
+            background,
+            fg_muted,
+            green,
+            blue,
+            grid,
+        } = self.palette;
 
         root.fill(&background)
             .inspect_err(|error| tracing::warn!(%error, "chart: failed to fill background"))
@@ -194,7 +201,9 @@ impl Chart<Message> for ThroughputChart<'_> {
                         .map(|(i, s)| (i as f64 + offset, s.in_bps)),
                     green.stroke_width(2),
                 ))
-                .inspect_err(|error| tracing::warn!(%error, "chart: failed to draw download series"))
+                .inspect_err(
+                    |error| tracing::warn!(%error, "chart: failed to draw download series"),
+                )
                 .ok();
 
             // Upload (out) — blue
