@@ -23,7 +23,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        run: rustup toolchain install stable --component llvm-tools-preview
+        run: rustup toolchain install nightly --component llvm-tools-preview
 
       - name: Install cargo-llvm-cov
         run: |
@@ -31,7 +31,7 @@ jobs:
           cargo binstall --no-confirm cargo-llvm-cov
 
       - name: Generate coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        run: cargo +nightly llvm-cov --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24 # v5
@@ -42,7 +42,7 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Generate coverage summary
-        run: cargo llvm-cov --workspace --text 2>&1 | tee coverage-summary.txt
+        run: cargo +nightly llvm-cov --workspace --text 2>&1 | tee coverage-summary.txt
 
       - name: Coverage summary
         run: |
