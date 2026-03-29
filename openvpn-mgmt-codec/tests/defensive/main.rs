@@ -20,17 +20,7 @@ use bytes::BytesMut;
 use openvpn_mgmt_codec::*;
 use tokio_util::codec::{Decoder, Encoder};
 
-use common::encode_str as encode;
-
-// --- Helpers ---
-
-/// Try to encode a command in Strict mode.
-fn try_encode_strict(cmd: OvpnCommand) -> Result<String, std::io::Error> {
-    let mut codec = OvpnCodec::new().with_encoder_mode(EncoderMode::Strict);
-    let mut buf = BytesMut::new();
-    codec.encode(cmd, &mut buf)?;
-    Ok(String::from_utf8(buf.to_vec()).unwrap())
-}
+use common::{encode_str as encode, try_encode_strict};
 
 // ---  ---
 // 1. Newline injection via quote_and_escape
@@ -560,11 +550,14 @@ fn management_password_newline_must_not_inject_command() {
 //
 // This is a well-known C interop attack vector.  Real-world precedent:
 //   - https://github.com/OpenVPN/openvpn/issues/645
-//     Clients appending \n\0 to 2FA responses.
-//   - https://nvd.nist.gov/vuln/detail/CVE-2024-5594
-//     Unsanitized control characters in PUSH_REPLY.
+//     Clients (OpenVPN Connect v3.5.1) appending \n\0 to 2FA responses.
+//   - https://nvd.nist.gov/vuln/detail/CVE-2024-5594 (CVSS 9.1)
+//     Unsanitized control characters in PUSH_REPLY (fixed in 2.6.11).
 //   - https://community.openvpn.net/openvpn/ticket/908
 //     Stray LF in passwords causing management client hangs.
+//   - https://community.openvpn.net/openvpn/ticket/958
+//     Special characters (", \) in passwords must be escaped per
+//     config-file lexer rules; embedded \n breaks the wire format.
 
 #[test]
 fn password_null_byte_must_be_stripped() {
@@ -724,9 +717,19 @@ fn strict_kill_common_name_bare_cr_rejected() {
 // multiple wire lines.  A user who builds `Raw("status\nkill all")`
 // likely expects a single command, not two.
 //
-// Prior art: https://nvd.nist.gov/vuln/detail/CVE-2024-54780
-// pfSense passed unsanitized user input (containing \n) to the
-// OpenVPN management interface, allowing arbitrary command injection.
+// Prior art:
+//   - https://nvd.nist.gov/vuln/detail/CVE-2024-54780 (CVSS 8.8)
+//     pfSense CE < 2.8.0 passed unsanitized user input (containing \n)
+//     to the OpenVPN management interface via the remipp parameter in
+//     the OpenVPN widget, allowing arbitrary command injection
+//     (e.g. `remipp=5\nstatus` → two commands).
+//   - https://seclists.org/fulldisclosure/2021/Sep/47
+//     CVE-2021-31605 (CVSS 9.3): openvpn-monitor 1.1.3 passed HTTP
+//     POST params (ip, port, client_id) unsanitized to the management
+//     socket, enabling `signal SIGTERM` injection via newline.
+//   - https://claroty.com/team82/research/all-roads-lead-to-openvpn-pwning-industrial-remote-access-clients
+//     Industrial VPN clients expose management interface on local TCP
+//     with no auth — any local process can inject commands.
 
 #[test]
 fn raw_newline_must_not_inject_command() {

@@ -42,6 +42,14 @@ pub fn try_decode_all(
     }
 }
 
+/// Try to encode a command in Strict mode, returning the wire string or an error.
+pub fn try_encode_strict(cmd: OvpnCommand) -> Result<String, std::io::Error> {
+    let mut codec = OvpnCodec::new().with_encoder_mode(EncoderMode::Strict);
+    let mut buf = BytesMut::new();
+    codec.encode(cmd, &mut buf)?;
+    Ok(String::from_utf8(buf.to_vec()).unwrap())
+}
+
 /// Encode a command with a fresh codec and return the wire string.
 pub fn encode_str(cmd: OvpnCommand) -> String {
     let mut codec = OvpnCodec::new();

@@ -10,16 +10,7 @@ use bytes::BytesMut;
 use openvpn_mgmt_codec::*;
 use tokio_util::codec::{Decoder, Encoder};
 
-use super::common::{decode_all, encode_str as encode};
-
-// --- Helpers ---
-
-fn try_encode_strict(cmd: OvpnCommand) -> Result<String, std::io::Error> {
-    let mut codec = OvpnCodec::new().with_encoder_mode(EncoderMode::Strict);
-    let mut buf = BytesMut::new();
-    codec.encode(cmd, &mut buf)?;
-    Ok(String::from_utf8(buf.to_vec()).unwrap())
-}
+use super::common::{decode_all, encode_str as encode, try_encode_strict};
 
 // ---  ---
 // Variable-length >STATE: fields with trailing empty commas
@@ -126,7 +117,17 @@ fn state_string_timestamp_degrades_to_simple() {
 // ---  ---
 // UNDEF as Common Name in CLIENT ENV
 // Source: https://community.openvpn.net/openvpn/ticket/160
+//         https://community.openvpn.net/openvpn/ticket/1434
 //         https://github.com/jkroepke/openvpn-auth-oauth2/issues/139
+//
+// Ticket #160: OpenVPN clears common_name internally before calling
+//   disconnect scripts — the TLS session may already be torn down,
+//   so set_common_name() has nothing to read.
+// Ticket #1434: Same symptom via a different code path — the
+//   client-disconnect script env lacks common_name entirely.
+// Also observed in forum reports:
+//   https://forums.openvpn.net/viewtopic.php?t=12801
+//   https://forum.netgate.com/topic/175246/openvpn-common-name-undef
 // ---  ---
 
 #[test]
@@ -149,8 +150,10 @@ fn client_env_undef_common_name() {
 #[test]
 fn client_env_missing_common_name_entirely() {
     // Source: https://community.openvpn.net/openvpn/ticket/160
+    //         https://community.openvpn.net/openvpn/ticket/1434
     //         https://forums.openvpn.net/viewtopic.php?t=12801
-    // In some disconnect scenarios, common_name is absent.
+    // In some disconnect scenarios, common_name is absent because
+    // the TLS session is already torn down when the script runs.
     let input = "\
         >CLIENT:DISCONNECT,5\n\
         >CLIENT:ENV,bytes_received=12345\n\
@@ -235,7 +238,10 @@ fn decoder_handles_null_byte_in_success() {
 // CRLF in base64 static challenge response
 // Source: https://github.com/OpenVPN/openvpn-gui/issues/317
 //         Windows CryptBinaryToString inserts \r\n every 76 chars
-//         by default, breaking the line-oriented protocol.
+//         by default (unless CRYPT_STRING_NOCRLF is set), breaking
+//         the line-oriented management protocol because \n is the
+//         message delimiter.
+//         Fix: set CRYPT_STRING_NOCRLF in CryptBinaryToString flags.
 // ---  ---
 
 #[test]
@@ -277,7 +283,10 @@ fn challenge_response_crlf_in_state_id_stripped() {
 // Double-escaping prevention
 // Source: https://github.com/OpenVPN/openvpn-gui/issues/351
 //         GUI escaped password THEN base64-encoded it, corrupting
-//         the payload.
+//         the payload.  When static-challenge is in use the input
+//         is already base64, so escaping the password inside the
+//         base64 breaks it.  The fix: skip management-interface
+//         escaping for base64-encoded payloads.
 // ---  ---
 
 #[test]
@@ -330,7 +339,13 @@ fn infomsg_web_auth_is_first_class() {
 
 #[test]
 fn pk_sign_with_algorithm_parsed() {
-    // >PK_SIGN:base64_data,algorithm — now properly parsed.
+    // >PK_SIGN:base64_data,algorithm — present when management client
+    // version > 2.  Supported padding algorithms (from management-notes.txt):
+    //   RSA_PKCS1_PADDING, RSA_NO_PADDING, ECDSA,
+    //   RSA_PKCS1_PSS_PADDING,hashalg=SHA256,saltlen=max
+    //
+    // Source: https://community.openvpn.net/openvpn/ticket/764
+    //         (external-key sometimes requests signatures for too-long data)
     let msgs = decode_all(">PK_SIGN:AABBCCDD==,RSA_PKCS1_PSS_PADDING\n");
     assert_eq!(msgs.len(), 1);
     assert!(matches!(
@@ -439,6 +454,15 @@ fn client_unknown_event_type_still_accumulates_env() {
 // Source: defensive — TCP connection drops and reconnects can produce
 //         empty lines; also observed in https://github.com/OpenVPN/openvpn/pull/46
 //         where man_read buffer corruption produced spurious empty lines.
+//
+// PR #46: a recursive issue in man_read where the input buffer enters
+//         an inconsistent state while processing commands, causing
+//         OpenVPN to process the same command multiple times and then
+//         fail to read remaining commands — emitting spurious blank lines.
+//
+// CVE-2025-2704 can also cause abrupt server crashes mid-output when
+// TLS-crypt-v2 state is corrupted, which may manifest as a truncated
+// TCP stream with trailing blank fragments.
 // ---  ---
 
 #[test]
@@ -511,8 +535,15 @@ fn incomplete_client_env_block_buffers_correctly() {
 
 // ---  ---
 // Invalid UTF-8 from server (binary garbage)
-// Source: https://nvd.nist.gov/vuln/detail/CVE-2024-5594
-//         Unsanitized control chars in PUSH_REPLY (fixed in 2.6.11).
+// Source: https://nvd.nist.gov/vuln/detail/CVE-2024-5594 (CVSS 9.1)
+//         OpenVPN before 2.6.11 did not sanitize PUSH_REPLY messages,
+//         allowing a malicious server to inject non-printable/control
+//         characters that end up in client logs, cause high CPU load,
+//         or feed garbage to third-party plugins.  Fixed in 2.6.11.
+//
+// Also patched in the same release:
+//   CVE-2024-28882 — multiple exit notifications extend session
+//   CVE-2024-4877 — Windows-specific GUI elevation
 // ---  ---
 
 #[test]
@@ -913,4 +944,710 @@ fn strict_challenge_response_crlf_in_state_id_rejected() {
         })
         .is_err()
     );
+}
+
+// =========================================================================
+// Gap-filling tests from CVEs, bug trackers, and protocol edge cases
+// discovered via internet research (2024–2026).
+// =========================================================================
+
+// ---  ---
+// Multi-byte UTF-8 in common names through encoder paths
+// Source: https://community.openvpn.net/openvpn/ticket/67
+//         (Unicode symbols in CN replaced by underscores before 2.3)
+//         https://community.openvpn.net/openvpn/ticket/194
+//         (Management Interface does not allow UTF-8 passwords)
+//
+// Since OpenVPN 2.3 with --no-name-remapping, CN can contain any
+// printable character including multi-byte UTF-8.  The encoder must
+// pass these through without corruption.
+// ---  ---
+
+#[test]
+fn kill_common_name_with_multibyte_utf8() {
+    let wire = encode(OvpnCommand::Kill(KillTarget::CommonName(
+        "Ñoño García".into(),
+    )));
+    assert_eq!(wire.lines().count(), 1);
+    assert!(
+        wire.contains("Ñoño García"),
+        "multi-byte UTF-8 CN was corrupted\nwire: {wire:?}"
+    );
+}
+
+#[test]
+fn kill_common_name_with_cjk_characters() {
+    let wire = encode(OvpnCommand::Kill(KillTarget::CommonName("田中太郎".into())));
+    assert_eq!(wire.lines().count(), 1);
+    assert!(
+        wire.contains("田中太郎"),
+        "CJK CN was corrupted\nwire: {wire:?}"
+    );
+}
+
+#[test]
+fn client_deny_reason_with_multibyte_utf8() {
+    let wire = encode(OvpnCommand::ClientDeny(ClientDeny {
+        cid: 1,
+        kid: 0,
+        reason: "Accès refusé".into(),
+        client_reason: Some("Доступ запрещён".into()),
+    }));
+    assert_eq!(wire.lines().count(), 1);
+    assert!(wire.contains("Accès refusé"));
+    assert!(wire.contains("Доступ запрещён"));
+}
+
+#[test]
+fn password_with_multibyte_utf8() {
+    // Ticket #194: UTF-8 passwords weren't supported on the management
+    // interface until later versions.  The encoder must preserve them.
+    let wire = encode(OvpnCommand::Password {
+        auth_type: AuthType::Auth,
+        value: "пароль密码Ñ".into(),
+    });
+    assert_eq!(wire.lines().count(), 1);
+    assert!(
+        wire.contains("пароль密码Ñ"),
+        "UTF-8 password was corrupted\nwire: {wire:?}"
+    );
+}
+
+// ---  ---
+// Common name with spaces — quoting required since 2.5
+// Source: https://sourceforge.net/p/openvpn/mailman/message/32963023/
+//         (compat-names and spaces in Common Names)
+//         https://github.com/opnsense/core/issues/2245
+//         (status table broken by spaces in CN)
+//
+// With --compat-names removed in 2.5, spaces are no longer
+// remapped to underscores.  `kill "Firstname Lastname"` must
+// be properly quoted on the wire.
+// ---  ---
+
+#[test]
+fn kill_common_name_with_spaces() {
+    let wire = encode(OvpnCommand::Kill(KillTarget::CommonName(
+        "Firstname Lastname".into(),
+    )));
+    assert_eq!(wire.lines().count(), 1);
+    assert!(
+        wire.contains("Firstname Lastname"),
+        "CN with spaces was corrupted\nwire: {wire:?}"
+    );
+}
+
+#[test]
+fn kill_common_name_that_looks_like_command_argument() {
+    // A CN that looks like a command flag should not confuse the parser.
+    let wire = encode(OvpnCommand::Kill(KillTarget::CommonName(
+        "--signal SIGTERM".into(),
+    )));
+    assert_eq!(wire.lines().count(), 1);
+    assert!(
+        wire.contains("--signal SIGTERM"),
+        "flag-like CN was corrupted or stripped\nwire: {wire:?}"
+    );
+}
+
+// ---  ---
+// CVE-2021-31605: Numeric field injection (openvpn-monitor)
+// Source: https://seclists.org/fulldisclosure/2021/Sep/47
+//         https://www.compass-security.com/en/news/detail/vulnerabilities-in-openvpn-monitor
+//
+// openvpn-monitor 1.1.3 passed HTTP POST params (ip, port,
+// client_id) unsanitized to the management socket.  An attacker
+// could inject "\nsignal SIGTERM" after a numeric value.
+//
+// This tests the same pattern via the codec: a client_pending_auth
+// extra field carrying an injection payload embedded after what
+// looks like numeric data.
+// ---  ---
+
+#[test]
+fn client_pending_auth_numeric_field_injection() {
+    // Simulates the CVE-2021-31605 pattern: a "numeric" value
+    // followed by a newline and an injected command.
+    let wire = encode(OvpnCommand::ClientPendingAuth {
+        cid: 5,
+        kid: 0,
+        extra: "WEB_AUTH::https://auth.example.com\nsignal SIGTERM".into(),
+        timeout: 30,
+    });
+    assert_eq!(
+        wire.lines().count(),
+        1,
+        "numeric field injection via client-pending-auth extra\nwire: {wire:?}"
+    );
+}
+
+// ---  ---
+// CRV1 dynamic challenge — challenge_text containing colons
+// Source: https://github.com/OpenVPN/openvpn/blob/master/doc/management-notes.txt
+//         "state_id may not contain colon characters, but
+//          challenge_text may"
+//
+// The decoder uses splitn(4, ':') on the CRV1 payload, so the
+// fourth segment (challenge_text) captures everything including
+// embedded colons.
+// ---  ---
+
+#[test]
+fn dynamic_challenge_with_colons_in_challenge_text() {
+    // challenge_text = "Enter code from device: Model X: PIN"
+    // This has two extra colons that must NOT be treated as CRV1 delimiters.
+    let input = ">PASSWORD:Verification Failed: 'Auth' \
+                 ['CRV1:R,E:c3RhdGVfaWQ=:dXNlcg==:Enter code from device: Model X: PIN']\n";
+    let msgs = decode_all(input);
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Password(
+            PasswordNotification::DynamicChallenge {
+                flags,
+                state_id,
+                username_b64,
+                challenge,
+            },
+        )) => {
+            assert_eq!(flags, "R,E");
+            assert_eq!(state_id, "c3RhdGVfaWQ=");
+            assert_eq!(username_b64, "dXNlcg==");
+            assert_eq!(
+                challenge, "Enter code from device: Model X: PIN",
+                "colons in challenge_text were incorrectly split"
+            );
+        }
+        other => panic!("expected DynamicChallenge, got: {other:?}"),
+    }
+}
+
+#[test]
+fn dynamic_challenge_with_empty_flags() {
+    // Flags can be empty (no echo, no response-required).
+    let input = ">PASSWORD:Verification Failed: 'Auth' \
+                 ['CRV1::c3RhdGU=:dXNlcg==:Simple challenge']\n";
+    let msgs = decode_all(input);
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Password(
+            PasswordNotification::DynamicChallenge { flags, .. },
+        )) => {
+            assert_eq!(flags, "");
+        }
+        other => panic!("expected DynamicChallenge, got: {other:?}"),
+    }
+}
+
+// ---  ---
+// >CLIENT:DISCONNECT with empty ENV block
+// Source: https://community.openvpn.net/openvpn/ticket/1434
+//         client-disconnect script env lacks common_name entirely
+//         when TLS session is already torn down.
+//
+// Unlike the UNDEF CN tests above (which have *some* env vars),
+// this tests a completely minimal disconnect: only the END marker.
+// ---  ---
+
+#[test]
+fn client_disconnect_with_completely_empty_env() {
+    let input = "\
+        >CLIENT:DISCONNECT,99\n\
+        >CLIENT:ENV,END\n";
+    let msgs = decode_all(input);
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Client {
+            event, cid, env, ..
+        }) => {
+            assert_eq!(*event, ClientEvent::Disconnect);
+            assert_eq!(*cid, 99);
+            assert!(
+                env.is_empty(),
+                "expected empty ENV block for bare disconnect, got: {env:?}"
+            );
+        }
+        other => panic!("expected Client DISCONNECT, got: {other:?}"),
+    }
+}
+
+// ---  ---
+// >CLIENT:REAUTH — distinct from CONNECT for client-deny behavior
+// Source: https://community.openvpn.net/openvpn/ticket/1447
+//         (Cannot reauthenticate clients using auth-token with
+//          management-client-auth)
+//
+// A client-deny issued for REAUTH invalidates the renegotiated key
+// but the existing TLS session continues for --tran-window seconds.
+// A client-deny issued for CONNECT terminates the session immediately.
+// The codec must distinguish these event types.
+// ---  ---
+
+#[test]
+fn client_reauth_parsed_distinctly_from_connect() {
+    let input = "\
+        >CLIENT:REAUTH,10,2\n\
+        >CLIENT:ENV,common_name=client1\n\
+        >CLIENT:ENV,END\n";
+    let msgs = decode_all(input);
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Client {
+            event, cid, kid, ..
+        }) => {
+            assert_eq!(*event, ClientEvent::Reauth);
+            assert_eq!(*cid, 10);
+            assert_eq!(*kid, Some(2));
+        }
+        other => panic!("expected Client REAUTH, got: {other:?}"),
+    }
+}
+
+// ---  ---
+// Password with literal backslash sequences
+// Source: https://community.openvpn.net/openvpn/ticket/958
+//         (Special characters in passwords)
+//
+// Passwords containing `"`, `\`, and literal `\n` (two characters,
+// not a newline) must be properly escaped per the OpenVPN config-file
+// lexer rules: `\\` → `\`, `\"` → `"`.
+// ---  ---
+
+#[test]
+fn password_with_backslash_and_quotes() {
+    let wire = encode(OvpnCommand::Password {
+        auth_type: AuthType::Auth,
+        value: r#"p@ss"w\ord"#.into(),
+    });
+    assert_eq!(wire.lines().count(), 1);
+    // The backslash and quote must be escaped on the wire.
+    assert!(
+        wire.contains(r#"p@ss\"w\\ord"#),
+        "backslash/quote escaping failed\nwire: {wire:?}"
+    );
+}
+
+#[test]
+fn password_with_literal_backslash_n_sequence() {
+    // Literal `\n` (two chars: backslash + n) — must be escaped as `\\n`,
+    // NOT treated as a newline.
+    let wire = encode(OvpnCommand::Password {
+        auth_type: AuthType::Auth,
+        value: r"before\nafter".into(),
+    });
+    assert_eq!(wire.lines().count(), 1);
+    assert!(
+        wire.contains(r"before\\nafter"),
+        "literal backslash-n was not escaped\nwire: {wire:?}"
+    );
+}
+
+// ---  ---
+// >PK_SIGN with large base64 payload and PSS padding params
+// Source: https://community.openvpn.net/openvpn/ticket/764
+//         (--management-external-key sometimes requests signatures
+//          for too long data)
+//
+// RSA-PSS algorithm field includes comma-separated params:
+//   RSA_PKCS1_PSS_PADDING,hashalg=SHA256,saltlen=max
+// The decoder must not split on these commas — the algorithm field
+// is everything after the first comma in the >PK_SIGN: payload.
+// ---  ---
+
+#[test]
+fn pk_sign_with_pss_padding_and_hash_params() {
+    let msgs = decode_all(">PK_SIGN:AABBCCDD==,RSA_PKCS1_PSS_PADDING,hashalg=SHA256,saltlen=max\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::PkSign {
+            data, algorithm, ..
+        }) => {
+            assert_eq!(data, "AABBCCDD==");
+            assert_eq!(
+                algorithm.as_deref(),
+                Some("RSA_PKCS1_PSS_PADDING,hashalg=SHA256,saltlen=max"),
+                "PSS padding params were truncated at internal comma"
+            );
+        }
+        other => panic!("expected PkSign, got: {other:?}"),
+    }
+}
+
+#[test]
+fn pk_sign_with_ecdsa_algorithm() {
+    let msgs = decode_all(">PK_SIGN:EEFF0011==,ECDSA\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(matches!(
+        &msgs[0],
+        OvpnMessage::Notification(Notification::PkSign {
+            data,
+            algorithm: Some(algo),
+        }) if data == "EEFF0011==" && algo == "ECDSA"
+    ));
+}
+
+#[test]
+fn pk_sign_with_large_base64_payload() {
+    // Ticket #764: external-key can request signatures for large data.
+    // Simulate an 8 KB base64 payload.
+    let large_b64 = "A".repeat(8192);
+    let wire = format!(">PK_SIGN:{large_b64},RSA_PKCS1_PADDING\n");
+    let msgs = decode_all(&wire);
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::PkSign { data, .. }) => {
+            assert_eq!(data.len(), 8192);
+        }
+        other => panic!("expected PkSign, got: {other:?}"),
+    }
+}
+
+// ---  ---
+// >NEED-OK notification with quoted prompt
+// Source: https://openvpn.net/community-docs/management-interface.html
+//         "The needok command is used to confirm a >NEED-OK
+//          real-time notification, normally used by OpenVPN to
+//          block while waiting for a specific user action."
+//
+// The prompt name is single-quoted in the wire format:
+//   >NEED-OK:Need 'token-insertion-request' confirmation MSG:Please insert your Smartcard
+// ---  ---
+
+#[test]
+fn need_ok_with_smartcard_prompt() {
+    let msgs = decode_all(
+        ">NEED-OK:Need 'token-insertion-request' confirmation MSG:Please insert your Smartcard\n",
+    );
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::NeedOk { name, message }) => {
+            assert_eq!(name, "token-insertion-request");
+            assert_eq!(message, "Please insert your Smartcard");
+        }
+        other => panic!("expected NeedOk, got: {other:?}"),
+    }
+}
+
+#[test]
+fn need_ok_with_colon_in_message() {
+    // MSG text may contain colons — split_once("MSG:") ensures only the
+    // first MSG: is used as delimiter.
+    let msgs = decode_all(
+        ">NEED-OK:Need 'action' confirmation MSG:Step 1: insert token. Step 2: press OK.\n",
+    );
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::NeedOk { message, .. }) => {
+            assert_eq!(
+                message, "Step 1: insert token. Step 2: press OK.",
+                "colons in NEED-OK message were incorrectly split"
+            );
+        }
+        other => panic!("expected NeedOk, got: {other:?}"),
+    }
+}
+
+// ---  ---
+// Truncated TCP stream mid-multiline-block
+// Source: CVE-2025-2704 (https://nvd.nist.gov/vuln/detail/CVE-2025-2704)
+//         OpenVPN 2.6.1–2.6.13 with TLS-crypt-v2 can crash via ASSERT
+//         when receiving a mix of authenticated + malformed packets.
+//         The server exits abruptly, which from the management client's
+//         perspective looks like a TCP close mid-response.
+//
+// The decoder must not panic or corrupt state when the stream ends
+// in the middle of a multi-line block (before the terminating END).
+// ---  ---
+
+#[test]
+fn truncated_multiline_block_returns_none() {
+    let mut codec = OvpnCodec::new();
+    let mut enc = BytesMut::new();
+    codec
+        .encode(OvpnCommand::Status(StatusFormat::V2), &mut enc)
+        .unwrap();
+
+    // Feed a partial status response — no END terminator.
+    let mut buf = BytesMut::from(
+        "HEADER,CLIENT_LIST,Common Name,Real Address\n\
+         CLIENT_LIST,client1,203.0.113.10:52841\n",
+    );
+    // Should return None — still accumulating the block.
+    let result = codec.decode(&mut buf).unwrap();
+    assert!(
+        result.is_none(),
+        "expected None for truncated multiline block"
+    );
+}
+
+// ---  ---
+// `version n` silent acceptance for management client version < 4
+// Source: https://github.com/OpenVPN/openvpn/commit/d5814ecd2323ec7c2e6dad2cbf3884c031d9a5a3
+//         (Document management client versions)
+//         https://mail-archive.com/openvpn-devel@lists.sourceforge.net/msg35782.html
+//         (Fixup version command on management interface)
+//
+// For version 1–3, `version n` produces NO response from the server.
+// Only version >= 4 returns "SUCCESS: Management client version set
+// to N".  The codec must not hang waiting for a response that will
+// never come.
+// ---  ---
+
+#[test]
+fn set_version_3_expects_no_response() {
+    let mut codec = OvpnCodec::new();
+    let mut enc = BytesMut::new();
+    codec.encode(OvpnCommand::SetVersion(3), &mut enc).unwrap();
+
+    // The next thing on the wire is an unrelated notification — not a
+    // SUCCESS response.  The codec must emit the notification without
+    // blocking on a response that was never sent.
+    let mut buf = BytesMut::from(">BYTECOUNT:100,200\n");
+    let msg = codec.decode(&mut buf).unwrap();
+    assert!(
+        msg.is_some(),
+        "codec blocked waiting for version 3 response"
+    );
+    assert!(matches!(
+        msg.unwrap(),
+        OvpnMessage::Notification(Notification::ByteCount { .. })
+    ));
+}
+
+#[test]
+fn set_version_4_expects_success_response() {
+    let mut codec = OvpnCodec::new();
+    let mut enc = BytesMut::new();
+    codec.encode(OvpnCommand::SetVersion(4), &mut enc).unwrap();
+
+    let mut buf = BytesMut::from("SUCCESS: Management client version set to 4\n");
+    let msg = codec.decode(&mut buf).unwrap();
+    assert!(msg.is_some());
+    assert!(matches!(msg.unwrap(), OvpnMessage::Success(_)));
+}
+
+// ---  ---
+// >HOLD notification — blocking state machine
+// Source: https://forums.openvpn.net/viewtopic.php?t=32748
+//         (Client hangs at "Need hold release from management interface")
+//         https://deepwiki.com/OpenVPN/openvpn/8-management-interface
+//         (HOLD/RELEASE state machine)
+//
+// >HOLD: blocks the OpenVPN daemon until `hold release` is issued.
+// If the management client never responds, the server hangs.
+// ---  ---
+
+#[test]
+fn hold_notification_with_counter() {
+    let msgs = decode_all(">HOLD:Waiting for hold release:0\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Hold { text }) => {
+            assert_eq!(text, "Waiting for hold release:0");
+        }
+        other => panic!("expected Hold, got: {other:?}"),
+    }
+}
+
+#[test]
+fn hold_notification_with_nonzero_counter() {
+    // Counter > 0 means this is a restart hold, not the initial one.
+    let msgs = decode_all(">HOLD:Waiting for hold release:5\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Hold { text }) => {
+            assert_eq!(text, "Waiting for hold release:5");
+        }
+        other => panic!("expected Hold, got: {other:?}"),
+    }
+}
+
+// ---  ---
+// >CLIENT:ESTABLISHED — no KID field
+// Source: management-notes.txt
+//         ESTABLISHED and DISCONNECT have only CID (no KID).
+//         ENV block may include bytes_received/bytes_sent.
+// ---  ---
+
+#[test]
+fn client_established_has_no_kid() {
+    let input = "\
+        >CLIENT:ESTABLISHED,7\n\
+        >CLIENT:ENV,common_name=user1\n\
+        >CLIENT:ENV,END\n";
+    let msgs = decode_all(input);
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Client {
+            event, cid, kid, ..
+        }) => {
+            assert_eq!(*event, ClientEvent::Established);
+            assert_eq!(*cid, 7);
+            assert_eq!(*kid, None, "ESTABLISHED should not have KID");
+        }
+        other => panic!("expected Client ESTABLISHED, got: {other:?}"),
+    }
+}
+
+// ---  ---
+// >CLIENT:ADDRESS — single-line notification (no ENV block)
+// Source: manage.c — management_learn_addr()
+//         ADDRESS,{CID},{IP},{PRIMARY}
+// ---  ---
+
+#[test]
+fn client_address_ipv6() {
+    let msgs = decode_all(">CLIENT:ADDRESS,3,fd00::1,1\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::ClientAddress { cid, addr, primary }) => {
+            assert_eq!(*cid, 3);
+            assert_eq!(addr, "fd00::1");
+            assert!(*primary);
+        }
+        other => panic!("expected ClientAddress, got: {other:?}"),
+    }
+}
+
+// ---  ---
+// Static challenge (SC:) — flag bits
+// Source: management-notes.txt
+//         SC:{flag},{challenge_text}
+//         flag bit 0 = ECHO, bit 1 = RESPONSE_CONCAT (FORMAT)
+//
+// Flag value 0: no echo, base64 SCRV1 format.
+// Flag value 1: echo, base64 SCRV1 format.
+// Flag value 3: echo + response concatenated with password as plain text.
+// ---  ---
+
+#[test]
+fn static_challenge_flag_3_echo_and_concat() {
+    let msgs = decode_all(">PASSWORD:Need 'Auth' username/password SC:3,Enter backup code\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Password(
+            PasswordNotification::StaticChallenge {
+                echo,
+                response_concat,
+                challenge,
+            },
+        )) => {
+            assert!(*echo, "bit 0 should be set for flag=3");
+            assert!(*response_concat, "bit 1 should be set for flag=3");
+            assert_eq!(challenge, "Enter backup code");
+        }
+        other => panic!("expected StaticChallenge, got: {other:?}"),
+    }
+}
+
+#[test]
+fn static_challenge_with_colon_in_challenge_text() {
+    // Challenge text can contain commas and colons.
+    let msgs = decode_all(
+        ">PASSWORD:Need 'Auth' username/password SC:1,Enter PIN for device: YubiKey 5\n",
+    );
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Password(
+            PasswordNotification::StaticChallenge { challenge, .. },
+        )) => {
+            // split_once(',') ensures only the first comma is the delimiter.
+            assert_eq!(challenge, "Enter PIN for device: YubiKey 5");
+        }
+        other => panic!("expected StaticChallenge, got: {other:?}"),
+    }
+}
+
+// ---  ---
+// Management password prompt — 3-attempt limit
+// Source: manage.c man_check_password()
+//         After 3 failed attempts, the server closes the connection.
+//
+// The password prompt is "ENTER PASSWORD:" followed by a newline.
+// ---  ---
+
+#[test]
+fn management_password_prompt_parsed() {
+    let msgs = decode_all("ENTER PASSWORD:\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(
+        matches!(&msgs[0], OvpnMessage::PasswordPrompt),
+        "expected PasswordPrompt, got: {:?}",
+        msgs[0]
+    );
+}
+
+// ---  ---
+// >NOTIFY: notification — simple fallback
+// Source: manage.c — man_output_standalone()
+//         >NOTIFY:info,remote-exit,EXIT
+// ---  ---
+
+#[test]
+fn notify_notification_degrades_to_simple() {
+    let msgs = decode_all(">NOTIFY:info,remote-exit,EXIT\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Simple { kind, payload }) => {
+            assert_eq!(kind, "NOTIFY");
+            assert_eq!(payload, "info,remote-exit,EXIT");
+        }
+        other => panic!("expected Simple for NOTIFY, got: {other:?}"),
+    }
+}
+
+// ---  ---
+// >FATAL: with various real-world messages
+// Source: manage.c — fatal notifications from TAP driver, timeout, etc.
+// ---  ---
+
+#[test]
+fn fatal_tap_driver_error() {
+    let msgs = decode_all(">FATAL:There are no TAP-Windows adapters on this system.\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::Fatal { message }) => {
+            assert!(message.contains("TAP-Windows"));
+        }
+        other => panic!("expected Fatal, got: {other:?}"),
+    }
+}
+
+// ---  ---
+// >REMOTE: notification with hostname (not just IP)
+// Source: NordSecurity/gopenvpn — STATE with hostname as remote IP
+// ---  ---
+
+#[test]
+fn state_with_hostname_as_remote() {
+    let msgs = decode_all(">STATE:1700000000,CONNECTED,SUCCESS,10.8.0.1,vpn.example.com,1194,,\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::State {
+            remote_ip,
+            remote_port,
+            ..
+        }) => {
+            assert_eq!(remote_ip, "vpn.example.com");
+            assert_eq!(*remote_port, Some(1194));
+        }
+        other => panic!("expected State, got: {other:?}"),
+    }
+}
+
+// ---  ---
+// >STATE: with IPv6 local address (field 9)
+// Source: manage.h — tun_local_ipv6 field added in later versions
+// ---  ---
+
+#[test]
+fn state_with_ipv6_local_address() {
+    let msgs =
+        decode_all(">STATE:1700000000,CONNECTED,SUCCESS,10.8.0.1,1.2.3.4,1194,,1194,fd00::1\n");
+    assert_eq!(msgs.len(), 1);
+    match &msgs[0] {
+        OvpnMessage::Notification(Notification::State { local_ipv6, .. }) => {
+            assert_eq!(local_ipv6, "fd00::1");
+        }
+        other => panic!("expected State, got: {other:?}"),
+    }
 }
