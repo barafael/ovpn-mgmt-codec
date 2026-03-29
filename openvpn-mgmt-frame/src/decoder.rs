@@ -30,6 +30,23 @@ struct ClientEnvAccumulator {
 ///
 /// `>CLIENT:ENV` accumulation **is** handled here because the protocol
 /// guarantees atomicity for that block.
+///
+/// # Example
+///
+/// ```
+/// use bytes::BytesMut;
+/// use tokio_util::codec::Decoder;
+/// use openvpn_mgmt_frame::{Frame, FrameDecoder};
+///
+/// let mut decoder = FrameDecoder::new();
+/// let mut buf = BytesMut::from(">INFO:OpenVPN Management Interface\n");
+///
+/// // The first >INFO: line is emitted as Frame::Info (the connection banner).
+/// assert_eq!(
+///     decoder.decode(&mut buf).unwrap(),
+///     Some(Frame::Info("OpenVPN Management Interface".to_string())),
+/// );
+/// ```
 #[derive(Debug)]
 pub struct FrameDecoder {
     /// Accumulator for `>CLIENT:` ENV blocks.

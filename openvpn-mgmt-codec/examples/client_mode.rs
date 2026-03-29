@@ -16,11 +16,11 @@
 //! this program.
 
 use clap::Parser;
-use futures::{SinkExt, StreamExt};
+use futures::StreamExt;
 use openvpn_mgmt_codec::{
-    Notification, OvpnCodec, OvpnCommand, StatusFormat,
+    ManagementEvent, Notification, OvpnCodec, StatusFormat,
     command::connection_sequence,
-    stream::{ClassifyExt, ManagementEvent},
+    split::{ManagementSink, management_split},
 };
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
@@ -73,19 +73,18 @@ async fn main() -> anyhow::Result<()> {
 
 async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
     let framed = Framed::new(stream, OvpnCodec::new());
-    let (mut sink, raw_stream) = framed.split();
-    let mut mgmt = raw_stream.classify();
+    let (mut sink, mut events) = management_split(framed);
 
     // Run the standard startup sequence (enable log/state streaming,
     // request pid, set up bytecount reporting, release hold).
     for cmd in connection_sequence(5) {
-        sink.send(cmd).await?;
+        sink.send_command(cmd).await?;
     }
 
     // Request an initial status dump.
-    sink.send(OvpnCommand::Status(StatusFormat::V3)).await?;
+    sink.status(StatusFormat::V3).await?;
 
-    while let Some(event) = mgmt.next().await {
+    while let Some(event) = events.next().await {
         match event? {
             ManagementEvent::Notification(notification) => {
                 info!(?notification, "notification");

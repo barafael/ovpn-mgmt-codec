@@ -7,6 +7,21 @@ use std::collections::BTreeMap;
 /// map 1:1 to a wire line; [`ClientEnv`](Frame::ClientEnv) is the
 /// exception — it accumulates the full `>CLIENT:` header + ENV block
 /// before being emitted.
+///
+/// ```
+/// use bytes::BytesMut;
+/// use tokio_util::codec::Decoder;
+/// use openvpn_mgmt_frame::{Frame, FrameDecoder};
+///
+/// let mut decoder = FrameDecoder::new();
+/// let mut buf = BytesMut::from(
+///     "SUCCESS: pid=42\nERROR: unknown command\nEND\n"
+/// );
+///
+/// assert!(matches!(decoder.decode(&mut buf).unwrap(), Some(Frame::Success(_))));
+/// assert!(matches!(decoder.decode(&mut buf).unwrap(), Some(Frame::Error(_))));
+/// assert!(matches!(decoder.decode(&mut buf).unwrap(), Some(Frame::End)));
+/// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Frame {

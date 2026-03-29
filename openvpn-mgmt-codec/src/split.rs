@@ -79,8 +79,7 @@ use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use futures_core::Stream;
-use futures_util::{SinkExt, StreamExt as _};
+use futures_util::{SinkExt, Stream, StreamExt as _};
 use tokio_util::codec::Framed;
 
 use crate::auth::{AuthRetryMode, AuthType};

@@ -86,4 +86,4 @@ pub use status::{
     ClientStatistics, ConnectedClient, GlobalStats, ParseStatusError, RoutingEntry, StatusResponse,
     parse_client_statistics, parse_status,
 };
-pub use stream::{ClassifyExt, ManagementEvent};
+pub use stream::ManagementEvent;

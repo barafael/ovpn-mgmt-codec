@@ -9,13 +9,16 @@ license = "MIT OR Apache-2.0"
 keywords = ["openvpn", "management", "protocol", "codec", "tokio"]
 categories = ["network-programming", "encoding"]
 
+[features]
+conformance-tests = []
+serde = ["dep:serde"]
+
 [dependencies]
 base64 = "0.22"
 better_default = "1"
 bon = "3"
 bytes = "1"
 derive_more = { version = "1", features = ["debug", "display"] }
-futures-core = "0.3"
 openvpn-mgmt-frame = { version = "1.0.0-rc.3", path = "../openvpn-mgmt-frame" }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "alloc"] }
 serde = { version = "1", features = ["derive"], optional = true }
@@ -24,10 +27,6 @@ thiserror = "2"
 tokio = "1"
 tokio-util = { version = "0.7", features = ["codec"] }
 tracing = "0.1"
-
-[features]
-conformance-tests = []
-serde = ["dep:serde"]
 
 [dev-dependencies]
 anyhow = "1"

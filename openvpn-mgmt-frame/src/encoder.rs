@@ -51,6 +51,22 @@ pub enum EncodeError {
 ///
 /// In [`EncoderMode::Strict`]: returns `Err` if any unsafe characters
 /// are present.
+///
+/// ```
+/// use std::borrow::Cow;
+/// use openvpn_mgmt_frame::{wire_safe, EncoderMode};
+///
+/// // Clean input borrows the original.
+/// let clean = wire_safe("hello", "field", EncoderMode::Sanitize).unwrap();
+/// assert!(matches!(clean, Cow::Borrowed("hello")));
+///
+/// // Sanitize mode strips unsafe characters.
+/// let sanitized = wire_safe("line\none", "field", EncoderMode::Sanitize).unwrap();
+/// assert_eq!(&*sanitized, "lineone");
+///
+/// // Strict mode rejects unsafe characters.
+/// assert!(wire_safe("line\none", "field", EncoderMode::Strict).is_err());
+/// ```
 pub fn wire_safe<'a>(
     s: &'a str,
     field: &'static str,
@@ -68,6 +84,14 @@ pub fn wire_safe<'a>(
 }
 
 /// Backslash-escape `\` and `"` per the OpenVPN config-file lexer rules.
+///
+/// ```
+/// use openvpn_mgmt_frame::escape;
+///
+/// assert_eq!(escape("hello"), "hello");
+/// assert_eq!(escape(r#"pass"word"#), r#"pass\"word"#);
+/// assert_eq!(escape(r"back\slash"), r"back\\slash");
+/// ```
 pub fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -81,11 +105,27 @@ pub fn escape(s: &str) -> String {
 }
 
 /// Wrap an already-escaped string in double quotes.
+///
+/// ```
+/// use openvpn_mgmt_frame::{escape, quote};
+///
+/// let escaped = escape(r#"my "password""#);
+/// assert_eq!(quote(&escaped), r#""my \"password\"""#);
+/// ```
 pub fn quote(s: &str) -> String {
     format!("\"{s}\"")
 }
 
 /// Write a single line followed by `\n`.
+///
+/// ```
+/// use bytes::BytesMut;
+/// use openvpn_mgmt_frame::write_line;
+///
+/// let mut buf = BytesMut::new();
+/// write_line(&mut buf, "hold release");
+/// assert_eq!(&buf[..], b"hold release\n");
+/// ```
 pub fn write_line(dst: &mut BytesMut, s: &str) {
     dst.reserve(s.len() + 1);
     dst.put_slice(s.as_bytes());
@@ -101,6 +141,19 @@ pub fn write_line(dst: &mut BytesMut, s: &str) {
 ///
 /// In [`EncoderMode::Strict`] mode, body lines containing unsafe
 /// characters or equaling `"END"` cause an error.
+///
+/// ```
+/// use bytes::BytesMut;
+/// use openvpn_mgmt_frame::{write_block, EncoderMode};
+///
+/// let mut buf = BytesMut::new();
+/// let body = vec!["push \"route 10.0.0.0 255.0.0.0\"".to_string()];
+/// write_block(&mut buf, "client-auth 5 7", &body, EncoderMode::Sanitize).unwrap();
+/// assert_eq!(
+///     &buf[..],
+///     b"client-auth 5 7\npush \"route 10.0.0.0 255.0.0.0\"\nEND\n",
+/// );
+/// ```
 pub fn write_block(
     dst: &mut BytesMut,
     header: &str,

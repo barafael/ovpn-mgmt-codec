@@ -5,7 +5,6 @@
 //! full async path including buffering, backpressure, and stream termination.
 
 use futures::{SinkExt, StreamExt};
-use openvpn_mgmt_codec::stream::{ClassifyExt, ManagementEvent};
 use openvpn_mgmt_codec::*;
 use tokio::io::{AsyncWriteExt, duplex};
 use tokio_util::codec::Framed;
@@ -79,10 +78,10 @@ async fn framed_notification_before_command() {
 }
 
 #[tokio::test]
-async fn framed_classify_stream_adapter() {
+async fn framed_event_stream_adapter() {
     let (mut framed, mut server) = setup();
 
-    // Send server data: a notification then a command response
+    // Encode a command so the codec expects a response.
     framed.send(OvpnCommand::Pid).await.unwrap();
 
     server
@@ -93,10 +92,9 @@ async fn framed_classify_stream_adapter() {
         .await
         .unwrap();
 
-    // Split and classify
-    let (sink, raw_stream) = framed.split();
-    let events: Vec<ManagementEvent> = raw_stream
-        .classify()
+    // Split via management_split and collect events.
+    let (_sink, mut events) = management_split(framed);
+    let collected: Vec<ManagementEvent> = (&mut events)
         .take(2)
         .collect::<Vec<_>>()
         .await
@@ -104,17 +102,15 @@ async fn framed_classify_stream_adapter() {
         .map(|result| result.unwrap())
         .collect();
 
-    assert_eq!(events.len(), 2);
+    assert_eq!(collected.len(), 2);
     assert!(matches!(
-        &events[0],
+        &collected[0],
         ManagementEvent::Notification(Notification::State(..))
     ));
     assert!(matches!(
-        &events[1],
+        &collected[1],
         ManagementEvent::Response(OvpnMessage::Success(_))
     ));
-
-    drop(sink);
 }
 
 #[tokio::test]

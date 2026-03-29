@@ -20,11 +20,11 @@
 use std::net::SocketAddr;
 
 use clap::Parser;
-use futures::{SinkExt, StreamExt};
+use futures::StreamExt;
 use openvpn_mgmt_codec::{
-    OvpnCodec, OvpnCommand,
+    ManagementEvent, OvpnCodec,
     command::server_connection_sequence,
-    stream::{ClassifyExt, ManagementEvent},
+    split::{ManagementSink, management_split},
 };
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
@@ -67,16 +67,15 @@ async fn main() -> anyhow::Result<()> {
 
 async fn handle_connection(stream: TcpStream, peer: SocketAddr) -> anyhow::Result<()> {
     let framed = Framed::new(stream, OvpnCodec::new());
-    let (mut sink, raw_stream) = framed.split();
-    let mut mgmt = raw_stream.classify();
+    let (mut sink, mut events) = management_split(framed);
 
     // Run the server-mode startup sequence (includes env-filter setup).
     for cmd in server_connection_sequence(5, 0) {
-        sink.send(cmd).await?;
+        sink.send_command(cmd).await?;
     }
 
     // Process events until the connection closes.
-    while let Some(event) = mgmt.next().await {
+    while let Some(event) = events.next().await {
         match event? {
             ManagementEvent::Notification(notification) => {
                 info!(%peer, ?notification, "notification");
@@ -90,11 +89,7 @@ async fn handle_connection(stream: TcpStream, peer: SocketAddr) -> anyhow::Resul
                 } = &notification
                 {
                     info!(%peer, %cid, "auto-approving client");
-                    sink.send(OvpnCommand::ClientAuthNt {
-                        cid: *cid,
-                        kid: *kid,
-                    })
-                    .await?;
+                    sink.client_auth_nt(*cid, *kid).await?;
                 }
             }
             ManagementEvent::Response(response) => {
