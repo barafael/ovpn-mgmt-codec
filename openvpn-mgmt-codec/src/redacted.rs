@@ -58,6 +58,20 @@ impl From<&str> for Redacted {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for Redacted {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Redacted {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

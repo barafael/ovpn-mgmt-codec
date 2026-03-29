@@ -1,4 +1,5 @@
 /// Response to a `>NEED-OK:` prompt.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display)]
 #[strum(serialize_all = "lowercase")]
 pub enum NeedOkResponse {

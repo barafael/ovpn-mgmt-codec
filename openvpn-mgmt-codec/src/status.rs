@@ -52,11 +52,14 @@
 //! assert_eq!(stats.tun_tap_read_bytes, 1548576);
 //! ```
 
+use crate::UtcTimestamp;
+
 /// Parsed server-mode status response.
 ///
 /// Contains the connected client list, routing table, and global stats.
 /// Works with V1 (comma-separated), V2 (comma with headers), and V3
 /// (tab-delimited) formats.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusResponse {
     /// Title line (e.g. `"OpenVPN 2.6.8 x86_64-pc-linux-gnu"`).
@@ -65,7 +68,7 @@ pub struct StatusResponse {
 
     /// Timestamp of the status snapshot.
     /// Present in V2/V3, absent in V1.
-    pub timestamp: Option<crate::timestamp::UtcTimestamp>,
+    pub timestamp: Option<UtcTimestamp>,
 
     /// Human-readable update time (e.g. `"2024-03-21 14:30:00"`).
     /// Present in V1 (`Updated,...`) and V2/V3 (`TIME,...,...`).
@@ -77,8 +80,24 @@ pub struct StatusResponse {
     /// Routing table entries.
     pub routes: Vec<RoutingEntry>,
 
-    /// Global stats as key-value pairs (e.g. `("Max bcast/mcast queue length", "3")`).
-    pub global_stats: Vec<(String, String)>,
+    /// Global statistics (e.g. broadcast queue length, DCO status).
+    pub global_stats: GlobalStats,
+}
+
+/// Global statistics from the `GLOBAL_STATS` section.
+///
+/// Fields are `Option` because availability depends on the status version
+/// and OpenVPN release:
+/// - `max_bcast_mcast_queue_length` — present in all versions
+/// - `dco_enabled` — present in V2/V3 with OpenVPN 2.6+
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GlobalStats {
+    /// Maximum broadcast/multicast queue length observed.
+    pub max_bcast_mcast_queue_length: Option<u64>,
+
+    /// Whether Data Channel Offload is enabled (OpenVPN 2.6+, V2/V3 only).
+    pub dco_enabled: Option<bool>,
 }
 
 /// A connected client from the `CLIENT_LIST` section.
@@ -87,6 +106,7 @@ pub struct StatusResponse {
 /// - OpenVPN 2.3 (V2): no `virtual_ipv6`, `peer_id`, or `cipher`
 /// - OpenVPN 2.4+: all fields present
 /// - V1: no `virtual_ipv6`, `connected_since_t`, `username`, `cid`, `peer_id`, `cipher`
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectedClient {
     /// Certificate common name.
@@ -104,7 +124,7 @@ pub struct ConnectedClient {
     /// Human-readable connection time.
     pub connected_since: String,
     /// Timestamp of connection. V2/V3 only.
-    pub connected_since_t: Option<crate::timestamp::UtcTimestamp>,
+    pub connected_since_t: Option<UtcTimestamp>,
     /// Username. `None` when not using `--auth-user-pass` (OpenVPN sends
     /// `"UNDEF"`, which the parser maps to `None`). V2/V3 only.
     pub username: Option<String>,
@@ -117,6 +137,7 @@ pub struct ConnectedClient {
 }
 
 /// A routing table entry from the `ROUTING_TABLE` section.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoutingEntry {
     /// Virtual address (IPv4 or IPv6).
@@ -128,7 +149,7 @@ pub struct RoutingEntry {
     /// Human-readable last reference time.
     pub last_ref: String,
     /// Timestamp of last reference. V2/V3 only.
-    pub last_ref_t: Option<crate::timestamp::UtcTimestamp>,
+    pub last_ref_t: Option<UtcTimestamp>,
 }
 
 /// Client-mode statistics from `OpenVPN STATISTICS`.
@@ -136,6 +157,7 @@ pub struct RoutingEntry {
 /// Returned by `status` in client mode. The fields are byte counters.
 /// Optional fields are absent in older OpenVPN versions or when
 /// compression is disabled.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ClientStatistics {
     /// Bytes read from TUN/TAP device.
@@ -220,8 +242,8 @@ fn parse_optional_u64(s: &str) -> Option<u64> {
     }
 }
 
-fn parse_optional_timestamp(s: &str) -> Option<crate::timestamp::UtcTimestamp> {
-    parse_optional_u64(s).map(crate::timestamp::UtcTimestamp)
+fn parse_optional_timestamp(s: &str) -> Option<UtcTimestamp> {
+    parse_optional_u64(s).map(UtcTimestamp)
 }
 
 /// Map OpenVPN's `"UNDEF"` sentinel to `None`.
@@ -277,6 +299,25 @@ pub fn parse_status(lines: &[String]) -> Result<StatusResponse, ParseStatusError
     parse_status_v2v3(lines, sep)
 }
 
+/// Map a key-value pair from a `GLOBAL STATS` / `GLOBAL_STATS` line onto
+/// the typed [`GlobalStats`] struct. Unknown keys are silently ignored for
+/// forward compatibility.
+fn apply_global_stat(stats: &mut GlobalStats, key: &str, value: &str) {
+    match key {
+        "Max bcast/mcast queue length" => {
+            stats.max_bcast_mcast_queue_length = value.parse().ok();
+        }
+        "dco_enabled" => {
+            stats.dco_enabled = match value {
+                "1" => Some(true),
+                "0" => Some(false),
+                _ => None,
+            };
+        }
+        _ => {} // Forward-compat: ignore unknown keys
+    }
+}
+
 /// Parse V1 format: `OpenVPN CLIENT LIST`, comma-separated, no prefix markers.
 fn parse_status_v1(lines: &[String]) -> Result<StatusResponse, ParseStatusError> {
     let mut status = StatusResponse {
@@ -285,7 +326,7 @@ fn parse_status_v1(lines: &[String]) -> Result<StatusResponse, ParseStatusError>
         updated: None,
         clients: Vec::new(),
         routes: Vec::new(),
-        global_stats: Vec::new(),
+        global_stats: GlobalStats::default(),
     };
 
     #[derive(PartialEq)]
@@ -364,9 +405,7 @@ fn parse_status_v1(lines: &[String]) -> Result<StatusResponse, ParseStatusError>
             }
             Section::GlobalStats => {
                 if fields.len() >= 2 {
-                    status
-                        .global_stats
-                        .push((fields[0].to_string(), fields[1..].join(",")));
+                    apply_global_stat(&mut status.global_stats, fields[0], &fields[1..].join(","));
                 }
             }
         }
@@ -383,7 +422,7 @@ fn parse_status_v2v3(lines: &[String], sep: char) -> Result<StatusResponse, Pars
         updated: None,
         clients: Vec::new(),
         routes: Vec::new(),
-        global_stats: Vec::new(),
+        global_stats: GlobalStats::default(),
     };
 
     for line in lines {
@@ -468,9 +507,11 @@ fn parse_status_v2v3(lines: &[String], sep: char) -> Result<StatusResponse, Pars
                 });
             }
             "GLOBAL_STATS" if fields.len() >= 3 => {
-                status
-                    .global_stats
-                    .push((fields[1].to_string(), fields[2..].join(&sep.to_string())));
+                apply_global_stat(
+                    &mut status.global_stats,
+                    fields[1],
+                    &fields[2..].join(&sep.to_string()),
+                );
             }
             _ => {
                 // Unknown line — skip silently for forward compatibility.
@@ -605,10 +646,7 @@ mod tests {
             status.title.as_deref(),
             Some("OpenVPN 2.6.8 x86_64-pc-linux-gnu")
         );
-        assert_eq!(
-            status.timestamp,
-            Some(crate::timestamp::UtcTimestamp(1711031400))
-        );
+        assert_eq!(status.timestamp, Some(UtcTimestamp(1711031400)));
         assert_eq!(status.updated.as_deref(), Some("2024-03-21 14:30:00"));
         assert_eq!(status.clients.len(), 1);
         let client = &status.clients[0];
@@ -618,10 +656,7 @@ mod tests {
         assert!(client.virtual_ipv6.is_empty());
         assert_eq!(client.bytes_in, 1548576);
         assert_eq!(client.bytes_out, 984320);
-        assert_eq!(
-            client.connected_since_t,
-            Some(crate::timestamp::UtcTimestamp(1711012500))
-        );
+        assert_eq!(client.connected_since_t, Some(UtcTimestamp(1711012500)));
         assert_eq!(client.username, None); // "UNDEF" is mapped to None
         assert_eq!(client.cid, Some(0));
         assert_eq!(client.peer_id, Some(0));
@@ -630,14 +665,10 @@ mod tests {
         assert_eq!(status.routes.len(), 1);
         let route = &status.routes[0];
         assert_eq!(route.virtual_address, "10.8.0.6");
-        assert_eq!(
-            route.last_ref_t,
-            Some(crate::timestamp::UtcTimestamp(1711031390))
-        );
+        assert_eq!(route.last_ref_t, Some(UtcTimestamp(1711031390)));
 
-        assert_eq!(status.global_stats.len(), 1);
-        assert_eq!(status.global_stats[0].0, "Max bcast/mcast queue length");
-        assert_eq!(status.global_stats[0].1, "3");
+        assert_eq!(status.global_stats.max_bcast_mcast_queue_length, Some(3));
+        assert_eq!(status.global_stats.dco_enabled, None);
     }
 
     // --- V2 (comma-separated, modern) ---
@@ -671,8 +702,9 @@ mod tests {
         // IPv6 route
         assert_eq!(status.routes[1].virtual_address, "2002:232:324:12::8");
 
-        // Multiple GLOBAL_STATS lines
-        assert_eq!(status.global_stats.len(), 2);
+        // Both GLOBAL_STATS keys present
+        assert_eq!(status.global_stats.max_bcast_mcast_queue_length, Some(0));
+        assert_eq!(status.global_stats.dco_enabled, Some(false));
     }
 
     #[test]
@@ -711,7 +743,7 @@ mod tests {
         assert!(status.clients[0].cipher.is_none());
 
         assert_eq!(status.routes.len(), 2);
-        assert_eq!(status.global_stats.len(), 1);
+        assert_eq!(status.global_stats.max_bcast_mcast_queue_length, Some(3));
     }
 
     #[test]
@@ -720,7 +752,7 @@ mod tests {
         let status = parse_status(&lines).unwrap();
         assert!(status.clients.is_empty());
         assert!(status.routes.is_empty());
-        assert_eq!(status.global_stats.len(), 1);
+        assert_eq!(status.global_stats.max_bcast_mcast_queue_length, Some(0));
     }
 
     #[test]
@@ -861,8 +893,9 @@ mod tests {
         // GLOBAL_STATS with only 2 fields (tag + key, no value) — should be silently skipped.
         let lines = vec!["GLOBAL_STATS\torphan_key".to_string()];
         let status = parse_status(&lines).unwrap();
-        assert!(
-            status.global_stats.is_empty(),
+        assert_eq!(
+            status.global_stats,
+            GlobalStats::default(),
             "GLOBAL_STATS with <3 fields should be ignored",
         );
     }
@@ -872,9 +905,8 @@ mod tests {
         // Exactly 3 fields (tag + key + value) — the minimum accepted by the guard.
         let lines = vec!["GLOBAL_STATS\tMax bcast/mcast queue length\t3".to_string()];
         let status = parse_status(&lines).unwrap();
-        assert_eq!(status.global_stats.len(), 1);
-        assert_eq!(status.global_stats[0].0, "Max bcast/mcast queue length");
-        assert_eq!(status.global_stats[0].1, "3");
+        assert_eq!(status.global_stats.max_bcast_mcast_queue_length, Some(3));
+        assert_eq!(status.global_stats.dco_enabled, None);
     }
 
     // --- Edge cases ---
@@ -990,7 +1022,8 @@ mod tests {
         ];
         let status = parse_status(&lines).unwrap();
         assert_eq!(status.title.as_deref(), Some("Test"));
-        assert_eq!(status.global_stats.len(), 1);
+        // "key" is an unknown GLOBAL_STATS key — silently ignored.
+        assert_eq!(status.global_stats, GlobalStats::default());
     }
 
     #[test]

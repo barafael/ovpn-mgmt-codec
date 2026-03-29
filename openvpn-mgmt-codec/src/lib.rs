@@ -36,6 +36,8 @@ pub mod redacted;
 pub mod remote_action;
 /// Daemon signals (HUP, TERM, USR1, USR2).
 pub mod signal;
+/// Split-based management interface for concurrent command/notification handling.
+pub mod split;
 /// Typed parsers for `status` command responses (client table, routing, stats).
 pub mod status;
 /// Status output format versions (V1/V2/V3).
@@ -76,11 +78,12 @@ pub use unrecognized::UnrecognizedKind;
 pub use version_info::{ParseVersionError, VersionInfo};
 
 // Re-export key items from sub-modules for convenience.
-pub use client::{ClientError, ManagementClient};
+pub use client::{ManagementSession, SessionError};
 pub use command::{connection_sequence, server_connection_sequence};
 pub use parsed_response::{LoadStats, ParseResponseError, StateEntry};
+pub use split::{EventStream, ManagementSink, management_split};
 pub use status::{
-    ClientStatistics, ConnectedClient, ParseStatusError, RoutingEntry, StatusResponse,
+    ClientStatistics, ConnectedClient, GlobalStats, ParseStatusError, RoutingEntry, StatusResponse,
     parse_client_statistics, parse_status,
 };
 pub use stream::{ClassifyExt, ManagementEvent};

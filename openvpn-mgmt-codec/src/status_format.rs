@@ -10,6 +10,7 @@ pub struct ParseStatusFormatError(String);
 /// - V1: default human-readable format
 /// - V2: adds header/footer markers for easier parsing
 /// - V3: tab-delimited, ideal for programmatic consumption
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, strum::Display)]
 pub enum StatusFormat {
     /// Default human-readable format.

@@ -12,10 +12,10 @@
 //! - **events out** (`mpsc::Sender<ActorEvent>`): the actor sends
 //!   connected, disconnected, and decoded-message events back to the UI.
 //!
-//! # Why raw `OvpnCodec` instead of `ManagementClient`?
+//! # Why raw `OvpnCodec` instead of `ManagementSession`?
 //!
 //! The actor's `select!` loop must simultaneously wait for UI commands and
-//! incoming OpenVPN messages. `ManagementClient` takes `&mut self` per
+//! incoming OpenVPN messages. `ManagementSession` takes `&mut self` per
 //! command, which would block notification delivery while the actor waits
 //! for UI input. The raw `Framed` split into sink + stream gives the
 //! independent read/write halves that `select!` requires.

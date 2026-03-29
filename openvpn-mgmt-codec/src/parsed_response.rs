@@ -16,19 +16,20 @@
 //! assert_eq!(stats.nclients, 3);
 //! ```
 
-use crate::openvpn_state::OpenVpnState;
-use crate::timestamp::UtcTimestamp;
-use crate::version_info::VersionInfo;
+use crate::{openvpn_state::OpenVpnState, timestamp::UtcTimestamp, version_info::VersionInfo};
 
 /// Aggregated server statistics from `load-stats`.
 ///
 /// Wire format: `SUCCESS: nclients=N,bytesin=N,bytesout=N`
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LoadStats {
     /// Number of currently connected clients.
     pub nclients: u64,
+
     /// Total bytes received by the server.
     pub bytesin: u64,
+
     /// Total bytes sent by the server.
     pub bytesout: u64,
 }
@@ -199,6 +200,7 @@ pub fn parse_version(
 /// assert_eq!(entry.remote_ip, "198.51.100.1");
 /// assert_eq!(entry.remote_port, Some(1194));
 /// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateEntry {
     /// Timestamp of the state change.

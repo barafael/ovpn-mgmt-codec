@@ -6,6 +6,7 @@ use std::str::FromStr;
 pub struct ParseClientEventError(String);
 
 /// The sub-type of a `>CLIENT:` notification.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, strum::Display)]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 pub enum ClientEvent {

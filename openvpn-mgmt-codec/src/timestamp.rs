@@ -76,6 +76,7 @@ pub fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
 
 /// A Unix timestamp that implements [`Display`](fmt::Display) using
 /// [`format_utc`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UtcTimestamp(pub u64);
 

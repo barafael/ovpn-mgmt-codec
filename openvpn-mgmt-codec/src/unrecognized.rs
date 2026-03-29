@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 /// Describes why a line could not be classified into a known message type.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum UnrecognizedKind {
     /// A line starting with `>` (notification prefix) but missing the

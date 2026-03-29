@@ -7,6 +7,7 @@ pub struct ParseSignalError(String);
 
 /// Signals that can be sent to the OpenVPN daemon via the management
 /// interface. These are sent as string names, not actual Unix signals.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display)]
 pub enum Signal {
     /// Soft restart — re-read config, renegotiate TLS.

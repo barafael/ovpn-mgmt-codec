@@ -1,6 +1,7 @@
 use crate::transport_protocol::TransportProtocol;
 
 /// How to identify a client to kill (server mode).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KillTarget {
     /// Kill by Common Name from the client's TLS certificate.

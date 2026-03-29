@@ -10,6 +10,7 @@ use crate::timestamp::UtcTimestamp;
 
 /// Sub-types of `>PASSWORD:` notifications. The password notification
 /// has several distinct forms with completely different structures.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PasswordNotification {
     /// `>PASSWORD:Need 'Auth' username/password`
@@ -81,6 +82,7 @@ const SENSITIVE_ENV_KEYS: &[&str] = &["password"];
 /// The [`Debug`] implementation masks the values of known sensitive ENV
 /// keys (e.g. `password`) in [`Client`](Notification::Client) notifications,
 /// printing `<redacted>` instead.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(derive_more::Debug, Clone, PartialEq, Eq)]
 pub enum Notification {
     /// A multi-line `>CLIENT:` notification (CONNECT, REAUTH, ESTABLISHED,
@@ -487,6 +489,7 @@ mod tests {
 }
 
 /// A fully decoded message from the OpenVPN management interface.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OvpnMessage {
     /// A success response: `SUCCESS: [text]`.

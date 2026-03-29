@@ -1,10 +1,14 @@
-use std::{borrow::Cow, collections::BTreeMap, collections::VecDeque, io};
+use std::{collections::VecDeque, io};
 
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::BytesMut;
 use tokio_util::codec::{Decoder, Encoder};
 use tracing::{debug, warn};
 
+pub use openvpn_mgmt_frame::{AccumulationLimit, EncodeError, EncoderMode};
+use openvpn_mgmt_frame::{Frame, FrameDecoder, escape, quote, wire_safe, write_block, write_line};
+
 use crate::{
+    UtcTimestamp,
     auth::AuthType,
     client_event::ClientEvent,
     command::{OvpnCommand, ResponseKind},
@@ -19,116 +23,6 @@ use crate::{
     transport_protocol::TransportProtocol,
     unrecognized::UnrecognizedKind,
 };
-
-/// Characters that are unsafe in the line-oriented management protocol:
-/// `\n` and `\r` split commands; `\0` truncates at the C layer.
-const WIRE_UNSAFE: &[char] = &['\n', '\r', '\0'];
-
-/// Controls how the encoder handles characters that are unsafe for the
-/// line-oriented management protocol (`\n`, `\r`, `\0`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum EncoderMode {
-    /// Silently strip unsafe characters (default, defensive).
-    ///
-    /// `\n`, `\r`, and `\0` are removed from all user-supplied strings.
-    /// Block body lines equaling `"END"` are escaped to `" END"`.
-    #[default]
-    Sanitize,
-
-    /// Reject inputs containing unsafe characters with an error.
-    ///
-    /// [`Encoder::encode`] returns `Err(io::Error)` if any field contains
-    /// `\n`, `\r`, or `\0`, or if a block body line equals `"END"`.
-    /// The inner error can be downcast to [`EncodeError`] for structured
-    /// matching.
-    Strict,
-}
-
-/// Structured error for encoder-side validation failures.
-///
-/// Returned as the inner error of [`std::io::Error`] when [`EncoderMode::Strict`]
-/// is active and the input contains characters that would corrupt the wire protocol.
-#[derive(Debug, thiserror::Error)]
-pub enum EncodeError {
-    /// A field contains `\n`, `\r`, or `\0`.
-    #[error("{0} contains characters unsafe for the management protocol (\\n, \\r, or \\0)")]
-    UnsafeCharacters(&'static str),
-
-    /// A multi-line block body line equals `"END"`.
-    #[error("block body line equals \"END\", which would terminate the block early")]
-    EndInBlockBody,
-}
-
-/// Ensure a string is safe for the wire protocol.
-///
-/// In [`EncoderMode::Sanitize`]: strips `\n`, `\r`, and `\0`, returning
-/// the cleaned string (or borrowing the original if already clean).
-///
-/// In [`EncoderMode::Strict`]: returns `Err` if any unsafe characters
-/// are present.
-fn wire_safe<'a>(
-    s: &'a str,
-    field: &'static str,
-    mode: EncoderMode,
-) -> Result<Cow<'a, str>, io::Error> {
-    if !s.contains(WIRE_UNSAFE) {
-        return Ok(Cow::Borrowed(s));
-    }
-    match mode {
-        EncoderMode::Sanitize => Ok(Cow::Owned(
-            s.chars().filter(|chr| !WIRE_UNSAFE.contains(chr)).collect(),
-        )),
-        EncoderMode::Strict => Err(io::Error::other(EncodeError::UnsafeCharacters(field))),
-    }
-}
-
-/// Backslash-escape `\` and `"` per the OpenVPN config-file lexer rules
-/// ("Command Parsing" section):
-///   `\` → `\\`
-///   `"` → `\"`
-///
-/// This function performs *only* lexer escaping. Wire-safety validation
-/// or sanitization must happen upstream via [`wire_safe`].
-fn escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            _ => out.push(c),
-        }
-    }
-    out
-}
-
-/// Wrap an already-escaped string in double quotes for the wire format.
-///
-/// This is required for any user-supplied string that might contain
-/// whitespace, backslashes, or quotes — passwords, reason strings,
-/// needstr values, etc.
-fn quote(s: &str) -> String {
-    format!("\"{s}\"")
-}
-
-/// Codec-internal state for accumulating multi-line `>CLIENT:` notifications.
-#[derive(Debug)]
-struct ClientNotificationAccumulator {
-    event: ClientEvent,
-    cid: u64,
-    kid: Option<u64>,
-    env: BTreeMap<String, String>,
-}
-
-/// Controls how many items the decoder will accumulate in a multi-line
-/// response or `>CLIENT:` ENV block before returning an error.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AccumulationLimit {
-    /// No limit on accumulated items (the default).
-    Unlimited,
-
-    /// At most this many items before the decoder returns an error.
-    Max(usize),
-}
 
 /// Tokio codec for the OpenVPN management interface.
 ///
@@ -185,10 +79,6 @@ pub struct OvpnCodec {
     /// Accumulator for multi-line (END-terminated) command responses.
     multi_line_buf: Option<Vec<String>>,
 
-    /// Accumulator for multi-line `>CLIENT:` notifications. When this is
-    /// `Some(...)`, the decoder is waiting for `>CLIENT:ENV,END`.
-    client_notification: Option<ClientNotificationAccumulator>,
-
     /// Maximum lines to accumulate in a multi-line response.
     ///
     /// Defaults to `Max(10_000)` — a safety net against unbounded growth
@@ -198,17 +88,17 @@ pub struct OvpnCodec {
     #[default(AccumulationLimit::Max(10_000))]
     max_multi_line_lines: AccumulationLimit,
 
-    /// Maximum ENV entries to accumulate for a `>CLIENT:` notification.
-    #[default(AccumulationLimit::Unlimited)]
-    max_client_env_entries: AccumulationLimit,
-
     /// How the encoder handles unsafe characters in user-supplied strings.
     encoder_mode: EncoderMode,
 
-    /// Whether the initial `>INFO:` banner has been seen. The first `>INFO:`
-    /// is surfaced as [`OvpnMessage::Info`]; subsequent ones become
-    /// [`Notification::Info`].
-    seen_info: bool,
+    /// Low-level frame decoder that handles line splitting, `>CLIENT:ENV`
+    /// accumulation, and `>INFO:` banner detection.
+    frame_decoder: FrameDecoder,
+
+    /// Whether the frame decoder is currently accumulating a `>CLIENT:` ENV
+    /// block. Tracked here because the `FrameDecoder` does not expose its
+    /// internal accumulation state.
+    frame_decoder_accumulating: bool,
 }
 
 impl OvpnCodec {
@@ -228,7 +118,7 @@ impl OvpnCodec {
     /// Set the maximum number of ENV entries accumulated for
     /// `>CLIENT:` notifications before the decoder returns an error.
     pub fn with_max_client_env_entries(mut self, limit: AccumulationLimit) -> Self {
-        self.max_client_env_entries = limit;
+        self.frame_decoder = self.frame_decoder.with_max_client_env_entries(limit);
         self
     }
 
@@ -260,34 +150,13 @@ impl OvpnCodec {
     }
 }
 
-/// The decoder accumulated more items than its configured limit allows.
-#[derive(Debug, thiserror::Error)]
-#[error("{what} accumulation limit exceeded ({max})")]
-struct AccumulationLimitExceeded {
-    what: &'static str,
-    max: usize,
-}
-
-fn check_accumulation_limit(
-    current_len: usize,
-    limit: AccumulationLimit,
-    what: &'static str,
-) -> Result<(), io::Error> {
-    if let AccumulationLimit::Max(max) = limit
-        && current_len >= max
-    {
-        return Err(io::Error::other(AccumulationLimitExceeded { what, max }));
-    }
-    Ok(())
-}
-
 // --- Encoder ---
 
 impl Encoder<OvpnCommand> for OvpnCodec {
     type Error = io::Error;
 
     fn encode(&mut self, item: OvpnCommand, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        if self.multi_line_buf.is_some() || self.client_notification.is_some() {
+        if self.multi_line_buf.is_some() || self.frame_decoder_accumulating {
             warn!(
                 "encode() called while the decoder is mid-accumulation \
                  (multi_line_buf or client_notification is active). \
@@ -597,70 +466,6 @@ impl Encoder<OvpnCommand> for OvpnCodec {
     }
 }
 
-/// Write a single line followed by `\n`.
-fn write_line(dst: &mut BytesMut, s: &str) {
-    dst.reserve(s.len() + 1);
-    dst.put_slice(s.as_bytes());
-    dst.put_u8(b'\n');
-}
-
-/// Write a multi-line block: header line, body lines, and a terminating `END`.
-///
-/// In [`EncoderMode::Sanitize`] mode, body lines have `\n`, `\r`, and `\0`
-/// stripped, and any line that would be exactly `"END"` is escaped to
-/// `" END"` so the server does not treat it as the block terminator.
-///
-/// In [`EncoderMode::Strict`] mode, body lines containing unsafe characters
-/// or equaling `"END"` cause an error.
-fn write_block(
-    dst: &mut BytesMut,
-    header: &str,
-    lines: &[String],
-    mode: EncoderMode,
-) -> Result<(), io::Error> {
-    // Upper-bound byte count for the entire block on the wire:
-    //   header.len()  — header line text (e.g. ">client-auth 7 42")
-    //   + 1           — '\n' terminating the header
-    //   + Σ(l.len()+2)— each body line's text + "\r\n" (2 bytes)
-    //   + 4           — "END\n" block terminator
-    // This is a conservative estimate: sanitized lines may shrink or grow
-    // slightly, but over-reserving is harmless — only written bytes count.
-    let total: usize =
-        header.len() + 1 + lines.iter().map(|line| line.len() + 2).sum::<usize>() + 4;
-    dst.reserve(total);
-    dst.put_slice(header.as_bytes());
-    dst.put_u8(b'\n');
-    for line in lines {
-        let clean = wire_safe(line, "block body line", mode)?;
-        if *clean == *"END" {
-            match mode {
-                EncoderMode::Sanitize => {
-                    dst.put_slice(b" END");
-                    dst.put_u8(b'\n');
-                    continue;
-                }
-                EncoderMode::Strict => {
-                    return Err(io::Error::other(EncodeError::EndInBlockBody));
-                }
-            }
-        }
-        dst.put_slice(clean.as_bytes());
-        dst.put_u8(b'\n');
-    }
-    dst.put_slice(b"END\n");
-    Ok(())
-}
-
-/// The password prompt.
-///
-/// May arrive without a trailing newline
-/// (OpenVPN ≥ 2.6 sends it as an interactive prompt, expecting
-/// the password on the same line).
-/// Handle this only when no complete line is available —
-/// if `\n` is in the buffer,
-/// the normal line-based path below handles it correctly.
-const PW_PROMPT: &[u8] = b"ENTER PASSWORD:";
-
 // --- Decoder ---
 
 impl Decoder for OvpnCodec {
@@ -669,224 +474,170 @@ impl Decoder for OvpnCodec {
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         loop {
-            // Find the next complete line.
-            let Some(newline_pos) = src.iter().position(|&b| b == b'\n') else {
-                // No complete line yet. Check for a password prompt
-                // without a trailing newline (OpenVPN ≥ 2.6 sends it as
-                // an interactive prompt with no line terminator).
-                // We accept any buffer that starts with the prompt text
-                // since no `\n` is present (checked above). Consume the
-                // prompt and any trailing `\r`.
-                if src.starts_with(PW_PROMPT) {
-                    let mut consume = PW_PROMPT.len();
-                    if src.get(consume) == Some(&b'\r') {
-                        consume += 1;
+            let len_before = src.len();
+            let frame = match self.frame_decoder.decode(src) {
+                Ok(Some(frame)) => frame,
+                Ok(None) => {
+                    // If bytes were consumed but no frame was returned, the
+                    // FrameDecoder is accumulating (e.g. >CLIENT:ENV block).
+                    if src.len() < len_before {
+                        self.frame_decoder_accumulating = true;
                     }
-                    src.advance(consume);
-                    return Ok(Some(OvpnMessage::PasswordPrompt));
+                    return Ok(None);
                 }
-                // Hint to Framed: reserve enough for a typical management
-                // protocol line so the next read_buf doesn't micro-allocate.
-                if src.capacity() - src.len() < 256 {
-                    src.reserve(256);
-                }
-                return Ok(None); // Need more data.
-            };
-
-            // Extract the line and advance the buffer past the newline.
-            let line_bytes = src.split_to(newline_pos + 1);
-            let line = match std::str::from_utf8(&line_bytes) {
-                Ok(text) => text,
                 Err(error) => {
                     // Reset all accumulation state so the decoder doesn't
                     // remain stuck in a half-finished multi-line block.
+                    // The FrameDecoder already resets its own state.
                     self.multi_line_buf = None;
-                    self.client_notification = None;
                     self.expected_queue.clear();
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, error));
+                    self.frame_decoder_accumulating = false;
+                    return Err(error);
                 }
-            }
-            .trim_end_matches(['\r', '\n'])
-            .to_string();
+            };
 
-            // Bare newlines (empty lines) carry no information when the
-            // decoder is not inside an accumulation context AND is not
-            // expecting a multi-line response. Skip them silently rather
-            // than emitting Unrecognized. This also absorbs the trailing
-            // `\n` when the password prompt was already consumed without
-            // a line terminator (OpenVPN ≥ 2.6).
-            if line.is_empty()
-                && self.multi_line_buf.is_none()
-                && self.client_notification.is_none()
-                && !matches!(self.expected_front(), ResponseKind::MultiLine)
-            {
-                continue;
-            }
-
-            // --- Phase 1: Multi-line >CLIENT: accumulation ---
-            //
-            // When we're accumulating a CLIENT notification, >CLIENT:ENV
-            // lines belong to it. The block terminates with >CLIENT:ENV,END.
-            // The spec guarantees atomicity for CLIENT notifications, so
-            // interleaving here should not occur. Any other line (SUCCESS,
-            // ERROR, other notifications) falls through to normal processing
-            // as a defensive measure.
-            if let Some(ref mut accum) = self.client_notification
-                && let Some(rest) = line.strip_prefix(">CLIENT:ENV,")
-            {
-                if rest == "END" {
-                    let finished = self.client_notification.take().expect("guarded by if-let");
-                    debug!(event = ?finished.event, cid = finished.cid, env_count = finished.env.len(), "decoded CLIENT notification");
-                    return Ok(Some(OvpnMessage::Notification(Notification::Client {
-                        event: finished.event,
-                        cid: finished.cid,
-                        kid: finished.kid,
-                        env: finished.env,
-                    })));
-                } else {
-                    // Parse "key=value" (value may contain '=').
-                    let (k, v) = rest
-                        .split_once('=')
-                        .map(|(k, v)| (k.to_string(), v.to_string()))
-                        .unwrap_or_else(|| (rest.to_string(), String::new()));
-                    check_accumulation_limit(
-                        accum.env.len(),
-                        self.max_client_env_entries,
-                        "client ENV",
-                    )?;
-                    accum.env.insert(k, v);
-                    continue; // Next line.
-                }
-            }
-            // Not a >CLIENT:ENV line — fall through to normal processing.
-            // This handles interleaved notifications or unexpected output.
-
-            // --- Phase 2: Multi-line command response accumulation ---
-            if let Some(ref mut buf) = self.multi_line_buf {
-                if line == "END" {
-                    let lines = self.multi_line_buf.take().expect("guarded by if-let");
+            match frame {
+                Frame::Success(text) => {
                     self.consume_expected();
-                    debug!(line_count = lines.len(), "decoded multi-line response");
-                    return Ok(Some(OvpnMessage::MultiLine(lines)));
+                    return Ok(Some(OvpnMessage::Success(text)));
                 }
-                // The spec only guarantees atomicity for CLIENT notifications,
-                // not for command responses — real-time notifications (>STATE:,
-                // >LOG:, etc.) can arrive mid-response. Emit them immediately
-                // without breaking the accumulation.
-                if line.starts_with('>') {
-                    if let Some(msg) = self.parse_notification(&line) {
-                        return Ok(Some(msg));
-                    }
-                    // parse_notification returns None when it starts a CLIENT
-                    // accumulation. Loop to read the next line.
-                    continue;
+
+                Frame::Error(text) => {
+                    self.consume_expected();
+                    return Ok(Some(OvpnMessage::Error(text)));
                 }
-                check_accumulation_limit(
-                    buf.len(),
-                    self.max_multi_line_lines,
-                    "multi-line response",
-                )?;
-                buf.push(line);
-                continue; // Next line.
-            }
 
-            // --- Phase 3: Self-describing lines ---
-            //
-            // SUCCESS: and ERROR: are unambiguous. We match on "SUCCESS:"
-            // without requiring a trailing space — the doc shows
-            // "SUCCESS: [text]" but text could be empty.
-            if let Some(rest) = line.strip_prefix("SUCCESS:") {
-                self.consume_expected();
-                return Ok(Some(OvpnMessage::Success(
-                    rest.strip_prefix(' ').unwrap_or(rest).to_string(),
-                )));
-            }
-            if let Some(rest) = line.strip_prefix("ERROR:") {
-                self.consume_expected();
-                return Ok(Some(OvpnMessage::Error(
-                    rest.strip_prefix(' ').unwrap_or(rest).to_string(),
-                )));
-            }
+                Frame::PasswordPrompt => {
+                    return Ok(Some(OvpnMessage::PasswordPrompt));
+                }
 
-            // Management interface password prompt (no `>` prefix).
-            if line == "ENTER PASSWORD:" {
-                return Ok(Some(OvpnMessage::PasswordPrompt));
-            }
+                Frame::Info(payload) => {
+                    return Ok(Some(OvpnMessage::Info(payload)));
+                }
 
-            // Real-time notifications.
-            if line.starts_with('>') {
-                if let Some(msg) = self.parse_notification(&line) {
+                Frame::Notification { kind, payload } => {
+                    // Notifications can arrive at any time, including
+                    // mid-accumulation of a multi-line response. Emit
+                    // immediately without breaking accumulation.
+                    let msg = self.parse_notification_from_frame(&kind, &payload);
                     return Ok(Some(msg));
                 }
-                // Started CLIENT notification accumulation — loop for ENV lines.
-                continue;
-            }
 
-            // --- Phase 4: Ambiguous lines — use command tracking ---
-            //
-            // The line is not self-describing (no SUCCESS/ERROR/> prefix).
-            // Use the expected-response state from the last encoded command
-            // to decide how to frame it.
-            match self.expected_front() {
-                ResponseKind::MultiLine => {
-                    if line == "END" {
-                        // Edge case: empty multi-line block (header-less).
+                Frame::ClientEnv { event, args, env } => {
+                    // The FrameDecoder has fully accumulated the CLIENT
+                    // ENV block. Parse it into a typed notification.
+                    self.frame_decoder_accumulating = false;
+                    let msg = self.parse_client_env(event, args, env);
+                    return Ok(Some(msg));
+                }
+
+                Frame::End => {
+                    if let Some(lines) = self.multi_line_buf.take() {
+                        // Completed multi-line response.
+                        self.consume_expected();
+                        debug!(line_count = lines.len(), "decoded multi-line response");
+                        return Ok(Some(OvpnMessage::MultiLine(lines)));
+                    }
+                    // No active buffer — check if we expected a multi-line
+                    // response (empty block: just END with no content lines).
+                    if matches!(self.expected_front(), ResponseKind::MultiLine) {
                         self.consume_expected();
                         return Ok(Some(OvpnMessage::MultiLine(Vec::new())));
                     }
-                    self.multi_line_buf = Some(vec![line]);
-                    continue; // Accumulate until END.
-                }
-                ResponseKind::SuccessOrError | ResponseKind::NoResponse => {
-                    self.consume_expected();
-                    warn!(line = %line, "unrecognized line from server");
+                    // Unexpected END — treat as unrecognized.
+                    warn!("unexpected END without active multi-line accumulation");
                     return Ok(Some(OvpnMessage::Unrecognized {
-                        line,
+                        line: "END".to_string(),
                         kind: UnrecognizedKind::UnexpectedLine,
                     }));
+                }
+
+                Frame::Line(line) => {
+                    // Empty lines carry no information when we're not
+                    // accumulating a multi-line response and not expecting
+                    // one. Skip them silently. This also absorbs the
+                    // trailing `\n` when the password prompt was already
+                    // consumed without a line terminator (OpenVPN >= 2.6).
+                    if line.is_empty()
+                        && self.multi_line_buf.is_none()
+                        && !matches!(self.expected_front(), ResponseKind::MultiLine)
+                    {
+                        continue;
+                    }
+
+                    // A line starting with '>' but without a colon is a
+                    // malformed notification — the FrameDecoder emits it
+                    // as a plain Line. Surface it as MalformedNotification.
+                    if line.starts_with('>') && !line[1..].contains(':') {
+                        warn!(line = %line, "malformed notification (no colon)");
+                        return Ok(Some(OvpnMessage::Unrecognized {
+                            line,
+                            kind: UnrecognizedKind::MalformedNotification,
+                        }));
+                    }
+
+                    // If we're accumulating a multi-line response, push
+                    // the line into the buffer.
+                    if let Some(ref mut buf) = self.multi_line_buf {
+                        if let AccumulationLimit::Max(max) = self.max_multi_line_lines {
+                            if buf.len() >= max {
+                                return Err(io::Error::other(MultiLineAccumulationLimitExceeded {
+                                    max,
+                                }));
+                            }
+                        }
+                        buf.push(line);
+                        continue;
+                    }
+
+                    // No active multi-line buffer. Use the expected-response
+                    // state to decide what to do.
+                    match self.expected_front() {
+                        ResponseKind::MultiLine => {
+                            // Start a new multi-line buffer.
+                            self.multi_line_buf = Some(vec![line]);
+                            continue;
+                        }
+                        ResponseKind::SuccessOrError | ResponseKind::NoResponse => {
+                            self.consume_expected();
+                            warn!(line = %line, "unrecognized line from server");
+                            return Ok(Some(OvpnMessage::Unrecognized {
+                                line,
+                                kind: UnrecognizedKind::UnexpectedLine,
+                            }));
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+/// The decoder accumulated more multi-line response lines than its configured
+/// limit allows.
+#[derive(Debug, thiserror::Error)]
+#[error("multi-line response accumulation limit exceeded ({max})")]
+struct MultiLineAccumulationLimitExceeded {
+    max: usize,
+}
+
 impl OvpnCodec {
-    /// Parse a `>` notification line. Returns `Some(msg)` for single-line
-    /// notifications and `None` when a multi-line CLIENT accumulation has
-    /// been started (the caller should continue reading lines).
-    fn parse_notification(&mut self, line: &str) -> Option<OvpnMessage> {
-        let inner = &line[1..]; // Strip leading `>`
-
-        let Some((kind, payload)) = inner.split_once(':') else {
-            // Malformed notification — no colon.
-            warn!(line = %line, "malformed notification (no colon)");
-            return Some(OvpnMessage::Unrecognized {
-                line: line.to_string(),
-                kind: UnrecognizedKind::MalformedNotification,
-            });
-        };
-
-        // >INFO: on the very first line is the connection banner — surface
-        // it as OvpnMessage::Info. All subsequent >INFO: lines (e.g.
-        // >INFO:WEB_AUTH::url) are routed to Notification::Info.
-        if kind == "INFO" {
-            if !self.seen_info {
-                self.seen_info = true;
-                return Some(OvpnMessage::Info(payload.to_string()));
-            }
-            return Some(OvpnMessage::Notification(Notification::Info {
-                message: payload.to_string(),
-            }));
-        }
-
-        // >CLIENT: may be multi-line. Inspect the sub-type to decide.
+    /// Parse a notification from its already-split kind and payload strings
+    /// (provided by [`Frame::Notification`]).
+    ///
+    /// The `>CLIENT:` handling (ENV accumulation, ADDRESS) is handled by the
+    /// [`FrameDecoder`] — the CLIENT kind should not appear here. If it does
+    /// (e.g. CLIENT ADDRESS which the FrameDecoder emits as Notification),
+    /// it is handled as a special case.
+    fn parse_notification_from_frame(&self, kind: &str, payload: &str) -> OvpnMessage {
+        // >CLIENT:ADDRESS — the FrameDecoder emits this as a Notification
+        // (single-line, no ENV block).
         if kind == "CLIENT" {
             let (event, args) = payload
                 .split_once(',')
-                .map(|(event_str, args_str)| (event_str.to_string(), args_str.to_string()))
+                .map(|(e, a)| (e.to_string(), a.to_string()))
                 .unwrap_or_else(|| (payload.to_string(), String::new()));
 
-            // ADDRESS notifications are always single-line (no ENV block).
             if event == "ADDRESS" {
                 let mut parts = args.splitn(3, ',');
                 let cid = parts
@@ -895,43 +646,28 @@ impl OvpnCodec {
                     .unwrap_or(0);
                 let addr = parts.next().unwrap_or("").to_string();
                 let primary = parts.next() == Some("1");
-                return Some(OvpnMessage::Notification(Notification::ClientAddress {
+                return OvpnMessage::Notification(Notification::ClientAddress {
                     cid,
                     addr,
                     primary,
-                }));
+                });
             }
 
-            // CONNECT, REAUTH, ESTABLISHED, DISCONNECT, and CR_RESPONSE all
-            // have ENV blocks. Parse CID, optional KID, and (for CR_RESPONSE)
-            // the trailing base64 response from the args.
-            let mut id_parts = args.splitn(3, ',');
-            let cid = id_parts
-                .next()
-                .and_then(|field| parse_field(field, "client cid"))
-                .unwrap_or(0);
-            let kid = id_parts
-                .next()
-                .and_then(|field| parse_field(field, "client kid"));
-
-            let parsed_event = if event == "CR_RESPONSE" {
-                let response = id_parts.next().unwrap_or("").to_string();
-                ClientEvent::CrResponse(response)
-            } else {
-                event
-                    .parse()
-                    .inspect_err(|error| warn!(%error, "unknown client event"))
-                    .unwrap_or_else(|_| ClientEvent::Unknown(event.clone()))
-            };
-
-            // Start accumulation — don't emit anything yet.
-            self.client_notification = Some(ClientNotificationAccumulator {
-                event: parsed_event,
-                cid,
-                kid,
-                env: BTreeMap::new(),
+            // Any other CLIENT notification without ENV should not reach here,
+            // but handle it gracefully.
+            return OvpnMessage::Notification(Notification::Simple {
+                kind: kind.to_string(),
+                payload: payload.to_string(),
             });
-            return None; // Signal to the caller to keep reading.
+        }
+
+        // >INFO: after the first one is routed to Notification::Info.
+        // The first >INFO: is emitted as Frame::Info by the FrameDecoder,
+        // so all Notification { kind: "INFO", .. } here are subsequent ones.
+        if kind == "INFO" {
+            return OvpnMessage::Notification(Notification::Info {
+                message: payload.to_string(),
+            });
         }
 
         // Dispatch to typed parsers. On parse failure, fall back to Simple.
@@ -964,22 +700,56 @@ impl OvpnCodec {
             "PROXY" => parse_proxy(payload),
             "PASSWORD" => parse_password(payload),
             "PKCS11ID-ENTRY" => {
-                return parse_pkcs11id_entry_notif(payload).or_else(|| {
-                    Some(OvpnMessage::Notification(Notification::Simple {
+                return parse_pkcs11id_entry_notif(payload).unwrap_or_else(|| {
+                    OvpnMessage::Notification(Notification::Simple {
                         kind: kind.to_string(),
                         payload: payload.to_string(),
-                    }))
+                    })
                 });
             }
             _ => None,
         };
 
-        Some(OvpnMessage::Notification(notification.unwrap_or(
-            Notification::Simple {
-                kind: kind.to_string(),
-                payload: payload.to_string(),
-            },
-        )))
+        OvpnMessage::Notification(notification.unwrap_or(Notification::Simple {
+            kind: kind.to_string(),
+            payload: payload.to_string(),
+        }))
+    }
+
+    /// Parse a fully accumulated `>CLIENT:` notification (from
+    /// [`Frame::ClientEnv`]) into a typed [`OvpnMessage`].
+    fn parse_client_env(
+        &self,
+        event: String,
+        args: String,
+        env: std::collections::BTreeMap<String, String>,
+    ) -> OvpnMessage {
+        let mut id_parts = args.splitn(3, ',');
+        let cid = id_parts
+            .next()
+            .and_then(|field| parse_field(field, "client cid"))
+            .unwrap_or(0);
+        let kid = id_parts
+            .next()
+            .and_then(|field| parse_field(field, "client kid"));
+
+        let parsed_event = if event == "CR_RESPONSE" {
+            let response = id_parts.next().unwrap_or("").to_string();
+            ClientEvent::CrResponse(response)
+        } else {
+            event
+                .parse()
+                .inspect_err(|error| warn!(%error, "unknown client event"))
+                .unwrap_or_else(|_| ClientEvent::Unknown(event.clone()))
+        };
+
+        debug!(event = ?parsed_event, cid, env_count = env.len(), "decoded CLIENT notification");
+        OvpnMessage::Notification(Notification::Client {
+            event: parsed_event,
+            cid,
+            kid,
+            env,
+        })
     }
 }
 
@@ -1025,7 +795,7 @@ fn parse_state(payload: &str) -> Option<Notification> {
     //   (a) timestamp, (b) state, (c) desc, (d) local_ip, (e) remote_ip,
     //   (f) remote_port, (g) local_addr, (h) local_port, (i) local_ipv6
     let mut parts = payload.splitn(9, ',');
-    let timestamp = crate::timestamp::UtcTimestamp(parse_field(parts.next()?, "state timestamp")?);
+    let timestamp = UtcTimestamp(parse_field(parts.next()?, "state timestamp")?);
     let state_str = parts.next()?;
     let name = state_str
         .parse()
@@ -1073,7 +843,7 @@ fn parse_bytecount_cli(payload: &str) -> Option<Notification> {
 
 fn parse_log(payload: &str) -> Option<Notification> {
     let (ts_str, rest) = payload.split_once(',')?;
-    let timestamp = crate::timestamp::UtcTimestamp(parse_field(ts_str, "log timestamp")?);
+    let timestamp = UtcTimestamp(parse_field(ts_str, "log timestamp")?);
     let (level_str, message) = rest.split_once(',')?;
     Some(Notification::Log {
         timestamp,
@@ -1087,7 +857,7 @@ fn parse_log(payload: &str) -> Option<Notification> {
 
 fn parse_echo(payload: &str) -> Option<Notification> {
     let (ts_str, param) = payload.split_once(',')?;
-    let timestamp = crate::timestamp::UtcTimestamp(parse_field(ts_str, "echo timestamp")?);
+    let timestamp = UtcTimestamp(parse_field(ts_str, "echo timestamp")?);
     Some(Notification::Echo {
         timestamp,
         param: param.to_string(),

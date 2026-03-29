@@ -2678,6 +2678,7 @@ dependencies = [
  "futures",
  "futures-core",
  "futures-util",
+ "openvpn-mgmt-frame",
  "pin-project-lite",
  "proptest",
  "proptest-state-machine",
@@ -2690,6 +2691,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
+]
+
+[[package]]
+name = "openvpn-mgmt-frame"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "thiserror 2.0.18",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

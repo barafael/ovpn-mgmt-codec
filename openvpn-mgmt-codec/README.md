@@ -20,7 +20,7 @@ or a Unix socket without hand-rolling string parsing.
 - **Full protocol coverage** -- 50 commands including auth, signals,
   client management, PKCS#11, external keys, proxy/remote overrides,
   and a `Raw` escape hatch for anything new.
-- **High-level client** -- `ManagementClient` separates command responses
+- **High-level client** -- `ManagementSession` separates command responses
   from async notifications and returns parsed results directly.
 - **Stream classification** -- the `ClassifyExt` trait splits a raw
   message stream into `Response` and `Notification` variants.
@@ -79,31 +79,27 @@ The crate offers two ways to talk to OpenVPN:
 
 | API | When to use |
 | --- | --- |
-| **`ManagementClient`** | Most applications. Sends commands and returns typed responses; dispatches notifications to a `broadcast` channel. See the [`client`](https://docs.rs/openvpn-mgmt-codec/latest/openvpn_mgmt_codec/client/) module. |
+| **`ManagementSession`** | Most applications. Sends commands and returns typed responses; dispatches notifications to a `broadcast` channel. See the [`client`](https://docs.rs/openvpn-mgmt-codec/latest/openvpn_mgmt_codec/client/) module. |
 | **`Framed<T, OvpnCodec>`** | When you need full control over the stream (custom backpressure, multiplexing, or integration with an existing tower/axum stack). |
 
 Both layers share the same `OvpnCommand` / `OvpnMessage` types.
 
 ### High-level client
 
-`ManagementClient` handles command/response pairing and forwards
-notifications to a broadcast channel:
+`ManagementSession` handles command/response pairing. Notifications
+that arrive between commands are stashed and available via
+`drain_notifications()`:
 
 ```rust,no_run
 use tokio::net::TcpStream;
-use tokio::sync::broadcast;
 use tokio_util::codec::Framed;
-use openvpn_mgmt_codec::{
-    ManagementClient, Notification, OvpnCodec, StatusFormat,
-};
+use openvpn_mgmt_codec::{ManagementSession, OvpnCodec, StatusFormat};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let stream = TcpStream::connect("127.0.0.1:7505").await?;
     let framed = Framed::new(stream, OvpnCodec::new());
-
-    let (notification_tx, mut notification_rx) = broadcast::channel::<Notification>(256);
-    let mut client = ManagementClient::new(framed, notification_tx);
+    let mut client = ManagementSession::new(framed);
 
     let version = client.version().await?;
     println!("version: {:?}", version.openvpn_version_line());

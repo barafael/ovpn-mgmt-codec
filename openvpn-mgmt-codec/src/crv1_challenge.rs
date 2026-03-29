@@ -44,6 +44,7 @@ use std::fmt;
 /// Use the generated builder for ergonomic construction, then call
 /// [`.to_string()`](ToString::to_string) to produce the wire-format
 /// `CRV1:…` string.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, bon::Builder)]
 pub struct Crv1Challenge {
     /// Comma-separated CRV1 flags (e.g. `"R,E"`).

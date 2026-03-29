@@ -57,6 +57,7 @@ use crate::message::{Notification, OvpnMessage};
 
 /// A management-interface event, categorized as either a command response
 /// or an asynchronous notification.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManagementEvent {
     /// A command response: [`OvpnMessage::Success`], [`OvpnMessage::Error`],

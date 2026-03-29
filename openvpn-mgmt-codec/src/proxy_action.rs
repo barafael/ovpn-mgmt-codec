@@ -1,5 +1,6 @@
 /// Proxy configuration for the `proxy` command (sent in response to a
 /// `>PROXY:` notification, requires `--management-query-proxy`).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProxyAction {
     /// Connect directly, no proxy.

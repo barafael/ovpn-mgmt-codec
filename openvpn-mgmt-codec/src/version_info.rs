@@ -36,6 +36,7 @@ pub enum ParseVersionError {
 /// assert_eq!(info.management_version(), Some(5));
 /// assert!(info.openvpn_version_line().unwrap().contains("2.6.9"));
 /// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VersionInfo {
     /// The management interface version number, if found.
