@@ -1,6 +1,6 @@
 [package]
 name = "openvpn-mgmt-codec"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 edition = "2024"
 rust-version = "1.85"
 description = "OpenVPN management protocol codecs (tokio-util en/decoder implementations)."
@@ -16,9 +16,8 @@ bon = "3"
 bytes = "1"
 derive_more = { version = "1", features = ["debug", "display"] }
 futures-core = "0.3"
-openvpn-mgmt-frame = { path = "../openvpn-mgmt-frame" }
+openvpn-mgmt-frame = { version = "1.0.0-rc.3", path = "../openvpn-mgmt-frame" }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "alloc"] }
-pin-project-lite = "0.2"
 serde = { version = "1", features = ["derive"], optional = true }
 strum = { version = "0.27", features = ["derive"] }
 thiserror = "2"

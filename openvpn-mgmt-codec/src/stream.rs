@@ -51,8 +51,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures_core::Stream;
-use pin_project_lite::pin_project;
-
 use crate::message::{Notification, OvpnMessage};
 
 /// A management-interface event, categorized as either a command response
@@ -79,28 +77,24 @@ impl From<OvpnMessage> for ManagementEvent {
     }
 }
 
-pin_project! {
-    /// A stream of [`ManagementEvent`]s, produced by
-    /// [`ClassifyExt::classify`].
-    ///
-    /// Each incoming `Result<OvpnMessage, io::Error>` is mapped through
-    /// the [`From<OvpnMessage> for ManagementEvent`] conversion, splitting
-    /// notifications from command responses.
-    pub struct Classified<S> {
-        #[pin]
-        inner: S,
-    }
+/// A stream of [`ManagementEvent`]s, produced by
+/// [`ClassifyExt::classify`].
+///
+/// Each incoming `Result<OvpnMessage, io::Error>` is mapped through
+/// the [`From<OvpnMessage> for ManagementEvent`] conversion, splitting
+/// notifications from command responses.
+pub struct Classified<S> {
+    inner: S,
 }
 
 impl<S> Stream for Classified<S>
 where
-    S: Stream<Item = Result<OvpnMessage, io::Error>>,
+    S: Stream<Item = Result<OvpnMessage, io::Error>> + Unpin,
 {
     type Item = Result<ManagementEvent, io::Error>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.project()
-            .inner
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.inner)
             .poll_next(cx)
             .map(|opt| opt.map(|result| result.map(ManagementEvent::from)))
     }
@@ -199,7 +193,7 @@ where
 /// # Ok(())
 /// # }
 /// ```
-pub trait ClassifyExt: Stream<Item = Result<OvpnMessage, io::Error>> + Sized {
+pub trait ClassifyExt: Stream<Item = Result<OvpnMessage, io::Error>> + Unpin + Sized {
     /// Classify each [`OvpnMessage`] into a [`ManagementEvent`],
     /// splitting notifications from command responses.
     fn classify(self) -> Classified<Self> {
@@ -207,7 +201,7 @@ pub trait ClassifyExt: Stream<Item = Result<OvpnMessage, io::Error>> + Sized {
     }
 }
 
-impl<S: Stream<Item = Result<OvpnMessage, io::Error>>> ClassifyExt for S {}
+impl<S: Stream<Item = Result<OvpnMessage, io::Error>> + Unpin> ClassifyExt for S {}
 
 #[cfg(test)]
 mod tests {
