@@ -2654,7 +2654,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "openvpn-mgmt-cli"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -2666,7 +2666,7 @@ dependencies = [
 
 [[package]]
 name = "openvpn-mgmt-codec"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 dependencies = [
  "anyhow",
  "base64",
@@ -2693,7 +2693,7 @@ dependencies = [
 
 [[package]]
 name = "openvpn-mgmt-frame"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 dependencies = [
  "bytes",
  "serde",
@@ -2704,7 +2704,7 @@ dependencies = [
 
 [[package]]
 name = "openvpn-mgmt-ui"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 dependencies = [
  "futures",
  "iced",
